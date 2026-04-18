@@ -140,10 +140,11 @@ function renderLoop(now) {
 function drawBall(ctx, body) {
   const { x, y } = body.position
   const radius = body.circleRadius || 6
+  const opacity = body._opacity ?? 1
 
   ctx.beginPath()
   ctx.arc(x, y, radius, 0, Math.PI * 2)
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = `rgba(255,255,255,${opacity.toFixed(3)})`
   ctx.fill()
 }
 

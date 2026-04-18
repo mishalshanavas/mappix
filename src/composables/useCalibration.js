@@ -30,6 +30,8 @@ import {
 } from '../utils/structuredLight.js'
 import { computeHomographyRANSAC, applyHomography } from '../utils/homography.js'
 
+const STORAGE_KEY = 'dynamic-mapper:calibration-H'
+
 const SETTLE_MS       = 150   // ms after projecting each pattern before capture
 const SETTLE_INIT_MS  = 300   // longer settle for initial white/black frames
 const AVG_FRAMES      = 2     // frames to average for white/black captures
@@ -45,11 +47,31 @@ function sleep(ms) {
 export function useCalibration() {
   const isCalibrated = ref(false)
   const calibrationMarkers = ref([])
+  const calibrationQuality = ref(null)  // { validPct, error, inliers, total }
   let _H = null
+
+  // --- Restore from localStorage on init ---
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      _H = JSON.parse(stored)
+      isCalibrated.value = true
+      console.log('[Calibration] Restored from localStorage')
+    }
+  } catch { /* ignore */ }
 
   function transformPoint(wx, wy) {
     if (!_H) return { x: wx, y: wy }
     return applyHomography(_H, wx, wy)
+  }
+
+  function resetCalibration() {
+    _H = null
+    isCalibrated.value = false
+    calibrationMarkers.value = []
+    calibrationQuality.value = null
+    try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
+    console.log('[Calibration] Reset')
   }
 
   /**
@@ -208,6 +230,14 @@ export function useCalibration() {
 
         _H = result.H
         isCalibrated.value = true
+        calibrationQuality.value = {
+          validPct: Math.round(validCount / n * 100),
+          error: +result.error.toFixed(1),
+          inliers: result.inliers,
+          total: srcPts.length,
+        }
+        // Persist to localStorage so calibration survives page refresh
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_H)) } catch { /* quota */ }
         report(`Calibrated ✓ (${result.error.toFixed(1)}px, ${result.inliers} inliers)`)
         console.log('[Calibration] Complete ✓')
         return true
@@ -223,5 +253,5 @@ export function useCalibration() {
     return false
   }
 
-  return { isCalibrated, calibrationMarkers, calibrate, transformPoint }
+  return { isCalibrated, calibrationMarkers, calibrationQuality, calibrate, transformPoint, resetCalibration }
 }

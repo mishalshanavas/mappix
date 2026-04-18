@@ -15,6 +15,8 @@ import Matter from 'matter-js'
 const { Engine, Runner, Composite, Bodies, Body, Events } = Matter
 
 const BALL_COLOR = '#ffffff'
+const BALL_LIFETIME_MS = 30_000  // balls fade out and die after 30 s
+const BALL_FADE_MS     = 4_000   // last 4 s of life spent fading
 
 function randBetween(a, b) {
   return a + Math.random() * (b - a)
@@ -46,9 +48,18 @@ export function usePhysics(getWidth, getHeight) {
     Events.on(engine.value, 'afterUpdate', () => {
       const h = getHeight()
       const world = engine.value.world
+      const now = performance.now()
       const toRemove = []
       for (const body of Composite.allBodies(world)) {
-        if (!body.isStatic && body.position.y > h + 100) toRemove.push(body)
+        if (body.isStatic) continue
+        // Off-screen
+        if (body.position.y > h + 100) { toRemove.push(body); continue }
+        // Lifetime
+        const age = now - (body._spawnedAt || now)
+        if (age >= BALL_LIFETIME_MS) { toRemove.push(body); continue }
+        // Fade opacity for drawing
+        const fadeStart = BALL_LIFETIME_MS - BALL_FADE_MS
+        body._opacity = age < fadeStart ? 1 : 1 - (age - fadeStart) / BALL_FADE_MS
       }
       for (const b of toRemove) Composite.remove(world, b)
     })
@@ -84,6 +95,8 @@ export function usePhysics(getWidth, getHeight) {
       density: 0.002,
       label: 'ball',
       _color: BALL_COLOR,
+      _spawnedAt: performance.now(),
+      _opacity: 1,
     })
 
     Body.setVelocity(ball, { x: randBetween(-0.4, 0.4), y: 0 })

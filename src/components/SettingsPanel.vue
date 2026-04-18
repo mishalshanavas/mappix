@@ -110,19 +110,30 @@
         <button class="btn secondary" @click="$emit('skip-calibration')" :disabled="!webcamOn">
           Skip (Identity)
         </button>
+        <button class="btn danger" @click="$emit('reset-calibration')" :disabled="!isCalibrated">
+          Reset Calibration
+        </button>
         <div v-if="appState === 'calibrating'" class="calib-progress">
           <div class="calib-bar">
             <div class="calib-fill" :style="{ width: (calibTotal > 0 ? (calibStep / calibTotal) * 100 : 0) + '%' }"></div>
           </div>
           <div class="calib-msg">{{ calibMessage }}</div>
         </div>
-        <div v-else-if="isCalibrated" class="calib-done">✓ Calibrated</div>
+        <div v-else-if="isCalibrated" class="calib-done">
+          <span class="calib-check">✓ Calibrated</span>
+          <div v-if="calibrationQuality" class="calib-stats">
+            <span>Error <strong>{{ calibrationQuality.error }}px</strong></span>
+            <span>Inliers <strong>{{ calibrationQuality.inliers }}/{{ calibrationQuality.total }}</strong></span>
+            <span>Coverage <strong>{{ calibrationQuality.validPct }}%</strong></span>
+          </div>
+        </div>
       </section>
 
       <!-- ============== ACTIONS ============== -->
       <section class="section">
         <h3>Actions</h3>
         <button class="btn" @click="$emit('clear-balls')">Clear Balls</button>
+        <button class="btn danger" @click="$emit('reset-physics')">Reset Physics</button>
         <button class="btn" @click="$emit('toggle-fullscreen')">Toggle Fullscreen</button>
         <label class="toggle-row">
           <span>Debug Outlines</span>
@@ -179,9 +190,10 @@ const props = defineProps({
   valMin:         { type: Number, default: 40 },
   minBlobArea:    { type: Number, default: 50 },
   // Calibration progress
-  calibStep:      { type: Number, default: 0 },
-  calibTotal:     { type: Number, default: 1 },
-  calibMessage:   { type: String, default: '' },
+  calibStep:          { type: Number, default: 0 },
+  calibTotal:         { type: Number, default: 1 },
+  calibMessage:       { type: String, default: '' },
+  calibrationQuality: { type: Object, default: null },
 })
 
 defineEmits([
@@ -189,7 +201,9 @@ defineEmits([
   'toggle-webcam',
   'calibrate',
   'skip-calibration',
+  'reset-calibration',
   'clear-balls',
+  'reset-physics',
   'toggle-fullscreen',
   'update:debug',
   'update:showWebcamBg',
@@ -352,6 +366,12 @@ watch(() => props.open, () => {
   color: #d0d0d4;
 }
 .btn.secondary:hover { background: rgba(255,255,255,0.18); }
+.btn.danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+.btn.danger:hover { background: rgba(239, 68, 68, 0.3); }
+.btn.danger:disabled { opacity: 0.25; cursor: default; }
 
 /* Calibration progress */
 .calib-progress { margin-top: 8px; }
@@ -377,6 +397,19 @@ watch(() => props.open, () => {
   margin-top: 6px;
   font-size: 12px;
   color: #4ade80;
+}
+.calib-check {
+  display: block;
+}
+.calib-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  color: #a1a1aa;
+}
+.calib-stats strong {
+  color: #e4e4e7;
 }
 
 /* Sliders */

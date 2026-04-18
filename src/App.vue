@@ -38,11 +38,14 @@
       :calibStep="calibProgress.step"
       :calibTotal="calibProgress.total"
       :calibMessage="calibProgress.message"
+      :calibrationQuality="calibrationQuality"
       @toggle="settingsOpen = !settingsOpen"
       @toggle-webcam="onToggleWebcam"
       @calibrate="onCalibrate"
       @skip-calibration="onSkipCalibration"
+      @reset-calibration="onResetCalibration"
       @clear-balls="clearBalls"
+      @reset-physics="onResetPhysics"
       @toggle-fullscreen="toggleFullscreen"
       @update:debug="debug = $event"
       @update:showWebcamBg="showWebcamBg = $event"
@@ -106,11 +109,17 @@ const det  = reactive({ hueMin: 15, hueMax: 70, satMin: 8, valMin: 55, minBlobAr
 // ---------------------------------------------------------------------------
 const { videoEl, ready: webcamReady, startWebcam, stopWebcam, captureFrame } = useWebcam()
 const { engine, startPhysics, stopPhysics, syncStaticBodies, updateSettings: updatePhysSettings, clearBalls } = usePhysics(canvasWidth, canvasHeight)
-const { isCalibrated, calibrationMarkers, calibrate, transformPoint } = useCalibration()
+const { isCalibrated, calibrationMarkers, calibrationQuality, calibrate, transformPoint, resetCalibration } = useCalibration()
 const { detectedRects, startDetection, stopDetection, updateSettings: updateDetSettings } = useDetection()
 
 function pushPhysicsSettings()  { updatePhysSettings({ ...phys }) }
 function pushDetectionSettings() { updateDetSettings({ ...det }) }
+
+function onResetPhysics() {
+  clearBalls()
+  Object.assign(phys, { spawnInterval: 430, ballSize: 11, bounciness: 0.80, gravity: 0.85, maxBalls: 300 })
+  pushPhysicsSettings()
+}
 
 // ---------------------------------------------------------------------------
 // Derived stats
@@ -199,6 +208,14 @@ function onSkipCalibration() {
   stopDetection()
   appState.value = 'running'
   startDetection(captureFrame, _scaledTransform())
+}
+
+function onResetCalibration() {
+  resetCalibration()
+  stopDetection()
+  if (appState.value === 'running') {
+    startDetection(captureFrame, _scaledTransform())
+  }
 }
 
 /** Build a transform that scales webcam (640×480) → canvas size when uncalibrated */
