@@ -122,9 +122,9 @@ function renderLoop(now) {
     }
   }
 
-  // === Draw detected contour outlines (always visible, gray) ===
-  if (props.detectedRects.length) {
-    ctx.strokeStyle = 'rgba(180, 180, 180, 0.6)'
+  // === Draw detected contour outlines (debug only) ===
+  if (props.debug && props.detectedRects.length) {
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.6)'
     ctx.lineWidth = 1.5
     for (const rect of props.detectedRects) {
       const pts = rect.hull || rect.corners
