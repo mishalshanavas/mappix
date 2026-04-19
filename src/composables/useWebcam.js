@@ -72,8 +72,8 @@ export function useWebcam() {
       _offscreenCtx = _offscreenCanvas.getContext('2d', { willReadFrequently: true })
     }
 
-    _offscreenCanvas.width = w
-    _offscreenCanvas.height = h
+    if (_offscreenCanvas.width !== w) _offscreenCanvas.width = w
+    if (_offscreenCanvas.height !== h) _offscreenCanvas.height = h
     _offscreenCtx.drawImage(video, 0, 0, w, h)
     return _offscreenCanvas
   }

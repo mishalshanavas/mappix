@@ -9,7 +9,7 @@
  *
  * Settings object (reactive) is read each tick so sliders are live.
  */
-import { shallowRef } from 'vue'
+import { shallowRef, ref } from 'vue'
 import Matter from 'matter-js'
 
 const { Engine, Runner, Composite, Bodies, Body, Events } = Matter
@@ -24,9 +24,11 @@ function randBetween(a, b) {
 
 export function usePhysics(getWidth, getHeight) {
   const engine = shallowRef(null)
+  const ballCount = ref(0)
   let runner = null
-  let spawnTimer = null
   let _stickyBodies = []
+  let _spawnAccum = 0
+  let _lastTick = 0
 
   // Settings object — overwritten by updateSettings()
   let _settings = {
@@ -48,43 +50,48 @@ export function usePhysics(getWidth, getHeight) {
     Events.on(engine.value, 'afterUpdate', () => {
       const h = getHeight()
       const world = engine.value.world
+      const bodies = world.bodies
       const now = performance.now()
+
+      // Accumulator-based ball spawning (drift-free, replaces setInterval)
+      if (_lastTick > 0) {
+        _spawnAccum += now - _lastTick
+        while (_spawnAccum >= _settings.spawnInterval) {
+          _spawnBall()
+          _spawnAccum -= _settings.spawnInterval
+        }
+      }
+      _lastTick = now
+
       const toRemove = []
-      for (const body of Composite.allBodies(world)) {
+      let dynCount = 0
+      for (const body of bodies) {
         if (body.isStatic) continue
-        // Off-screen
+        dynCount++
         if (body.position.y > h + 100) { toRemove.push(body); continue }
-        // Lifetime
         const age = now - (body._spawnedAt || now)
         if (age >= BALL_LIFETIME_MS) { toRemove.push(body); continue }
-        // Fade opacity for drawing
         const fadeStart = BALL_LIFETIME_MS - BALL_FADE_MS
         body._opacity = age < fadeStart ? 1 : 1 - (age - fadeStart) / BALL_FADE_MS
       }
       for (const b of toRemove) Composite.remove(world, b)
+      ballCount.value = dynCount - toRemove.length
     })
-
-    _scheduleSpawn()
-  }
-
-  function _scheduleSpawn() {
-    if (spawnTimer) clearInterval(spawnTimer)
-    spawnTimer = setInterval(() => _spawnBall(), _settings.spawnInterval)
   }
 
   function _spawnBall() {
     if (!engine.value) return
     const world = engine.value.world
-    const dynamicBodies = Composite.allBodies(world).filter(b => !b.isStatic)
-
-    if (dynamicBodies.length >= _settings.maxBalls) {
-      Composite.remove(world, dynamicBodies[0])
+    if (ballCount.value >= _settings.maxBalls) {
+      for (const b of world.bodies) {
+        if (!b.isStatic) { Composite.remove(world, b); break }
+      }
     }
 
     const w = getWidth()
     const radius = _settings.ballSize
-    // Tap: spawn in a narrow column (~5% of width) centred at top
-    const spread = w * 0.05
+    // Narrow column (~2% of width) centred at top for predictable fall
+    const spread = w * 0.02
     const cx = w / 2
     const x = cx + randBetween(-spread, spread)
 
@@ -99,29 +106,26 @@ export function usePhysics(getWidth, getHeight) {
       _opacity: 1,
     })
 
-    Body.setVelocity(ball, { x: randBetween(-0.4, 0.4), y: 0 })
+    Body.setVelocity(ball, { x: randBetween(-0.1, 0.1), y: 0 })
     Composite.add(world, ball)
   }
 
   function updateSettings(s) {
-    const intervalChanged = s.spawnInterval !== _settings.spawnInterval
     _settings = { ..._settings, ...s }
-
     if (engine.value) {
       engine.value.gravity.y = _settings.gravity
     }
-    if (intervalChanged && spawnTimer) _scheduleSpawn()
   }
 
   function clearBalls() {
     if (!engine.value) return
     const world = engine.value.world
-    const toRemove = Composite.allBodies(world).filter(b => !b.isStatic)
+    const toRemove = world.bodies.filter(b => !b.isStatic)
     for (const b of toRemove) Composite.remove(world, b)
   }
 
   function stopPhysics() {
-    if (spawnTimer) { clearInterval(spawnTimer); spawnTimer = null }
+    _spawnAccum = 0; _lastTick = 0
     if (runner) { Runner.stop(runner); runner = null }
     engine.value = null
   }
@@ -129,35 +133,66 @@ export function usePhysics(getWidth, getHeight) {
   function syncStaticBodies(rects) {
     if (!engine.value) return
     const world = engine.value.world
-    for (const b of _stickyBodies) Composite.remove(world, b)
-    _stickyBodies = []
 
-    for (const rect of rects) {
-      let body
-      if (rect.hull && rect.hull.length >= 3) {
-        // Use actual contour shape
-        const verts = rect.hull.map(p => ({ x: p.x, y: p.y }))
-        body = Bodies.fromVertices(rect.cx, rect.cy, [verts], {
-          isStatic: true,
-          restitution: _settings.bounciness,
-          friction: 0.05,
-          label: 'sticky',
-        })
+    // Build map of incoming rect IDs
+    const incomingById = new Map(rects.map(r => [r.id, r]))
+
+    // Remove bodies whose rect is gone, keep existing
+    const kept = new Map()
+    for (const b of _stickyBodies) {
+      if (incomingById.has(b._rectId)) {
+        kept.set(b._rectId, b)
       } else {
-        body = Bodies.rectangle(rect.cx, rect.cy, rect.w, rect.h, {
-          isStatic: true,
-          angle: rect.angle,
-          restitution: _settings.bounciness,
-          friction: 0.05,
-          label: 'sticky',
-        })
+        Composite.remove(world, b)
       }
-      if (body) {
-        Composite.add(world, body)
-        _stickyBodies.push(body)
+    }
+
+    _stickyBodies = []
+    for (const rect of rects) {
+      const existing = kept.get(rect.id)
+      if (existing) {
+        // Update position only — avoids expensive poly decomposition
+        Body.setPosition(existing, { x: rect.cx, y: rect.cy })
+        _stickyBodies.push(existing)
+      } else {
+        let body
+        if (rect.hull && rect.hull.length >= 3) {
+          const verts = rect.hull.map(p => ({ x: p.x, y: p.y }))
+          body = Bodies.fromVertices(rect.cx, rect.cy, [verts], {
+            isStatic: true,
+            restitution: _settings.bounciness,
+            friction: 0.05,
+            label: 'sticky',
+          })
+        } else {
+          body = Bodies.rectangle(rect.cx, rect.cy, rect.w, rect.h, {
+            isStatic: true,
+            angle: rect.angle,
+            restitution: _settings.bounciness,
+            friction: 0.05,
+            label: 'sticky',
+          })
+        }
+        if (body) {
+          body._rectId = rect.id
+          Composite.add(world, body)
+          _stickyBodies.push(body)
+        }
       }
     }
   }
 
-  return { engine, startPhysics, stopPhysics, syncStaticBodies, updateSettings, clearBalls }
+  function pausePhysics() {
+    if (runner) {
+      Runner.stop(runner)
+    }
+  }
+
+  function resumePhysics() {
+    if (runner && engine.value) {
+      Runner.run(runner, engine.value)
+    }
+  }
+
+  return { engine, ballCount, startPhysics, stopPhysics, pausePhysics, resumePhysics, syncStaticBodies, updateSettings, clearBalls }
 }

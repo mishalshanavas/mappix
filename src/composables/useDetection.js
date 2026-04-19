@@ -105,46 +105,53 @@ export function useDetection() {
     // Expose only confirmed-active blobs
     detectedRects.value = _tracked
       .filter(t => t.active)
-      .map(t => ({ cx: t.cx, cy: t.cy, w: t.w, h: t.h, angle: 0, hull: t.hull }))
+      .map(t => ({ id: t.id, cx: t.cx, cy: t.cy, w: t.w, h: t.h, angle: 0, hull: t.hull }))
   }
 
-  function startDetection(captureFrame, transformPoint) {
+  function startDetection(getVideoEl, transformPoint) {
     if (_timer) clearInterval(_timer)
     if (_worker) _worker.terminate()
     _tracked = []
     _busy = false
     _transformPoint = transformPoint
 
-    // Spin up detection worker
-    _worker = new Worker(
-      new URL('../workers/detection.worker.js', import.meta.url),
-      { type: 'module' }
-    )
-
-    _worker.onmessage = ({ data: { blobs } }) => {
-      _busy = false
-      _matchBlobs(blobs)
-    }
-    _worker.onerror = (e) => {
-      console.error('[Detection worker]', e)
-      _busy = false
-    }
-
-    _timer = setInterval(() => {
-      if (_busy) return   // skip frame if previous detection still in progress
-
-      const canvas = captureFrame()
-      if (!canvas) return
-
-      const ctx = canvas.getContext('2d')
-      const imgFull = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      const pixels = imgFull.data   // Uint8ClampedArray — will be transferred
-
-      _busy = true
-      _worker.postMessage(
-        { pixels, width: canvas.width, height: canvas.height, settings: { ..._s }, downsampleFactor: DOWNSAMPLE_FACTOR },
-        [pixels.buffer]
+    let _restarts = 0
+    function _initWorker() {
+      _worker = new Worker(
+        new URL('../workers/detection.worker.js', import.meta.url),
+        { type: 'module' }
       )
+      _worker.onmessage = ({ data: { blobs } }) => {
+        _busy = false
+        _matchBlobs(blobs)
+      }
+      _worker.onerror = (e) => {
+        console.error('[Detection worker]', e)
+        _busy = false
+        if (_restarts < 3) {
+          _restarts++
+          console.warn(`[Detection] Restarting worker (${_restarts}/3)`)
+          _worker.terminate()
+          _initWorker()
+        }
+      }
+    }
+    _initWorker()
+
+    _timer = setInterval(async () => {
+      if (_busy) return
+      const video = getVideoEl()
+      if (!video || video.readyState < 2) return
+      _busy = true
+      try {
+        const bmp = await createImageBitmap(video)
+        _worker.postMessage(
+          { bitmap: bmp, settings: { ..._s }, downsampleFactor: DOWNSAMPLE_FACTOR },
+          [bmp]
+        )
+      } catch {
+        _busy = false
+      }
     }, DETECTION_INTERVAL_MS)
   }
 

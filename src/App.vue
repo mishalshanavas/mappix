@@ -7,18 +7,25 @@
       :debug="debug"
       :appState="appState"
       :calibrationMarkers="calibrationMarkers"
-      :showMarkers="true"
+      :showMarkers="showMarkers"
       :detectedRects="detectedRects"
       :showWebcamBg="showWebcamBg"
       :videoEl="videoEl"
+      :maxBalls="phys.maxBalls"
+      :physicsPaused="physicsPaused"
+      :calibrationQuality="calibrationQuality"
       @canvas-ready="onCanvasReady"
       @resize="onCanvasResize"
     />
 
+    <!-- Color pick overlay -->
+    <div v-if="pickingColor" class="pick-overlay" @click="onCanvasClick">
+      <div class="pick-hint">Click on a sticky note to pick its color</div>
+    </div>
+
     <!-- Settings panel (left sidebar) -->
     <SettingsPanel
       :open="settingsOpen"
-      :autoHide="autoHide"
       :appState="appState"
       :webcamOn="webcamReady"
       :isCalibrated="isCalibrated"
@@ -27,7 +34,6 @@
       :fps="fps"
       :ballCount="ballCount"
       :stickyCount="stickyCount"
-      :videoEl="videoEl"
       :spawnInterval="phys.spawnInterval"
       :ballSize="phys.ballSize"
       :bounciness="phys.bounciness"
@@ -49,10 +55,10 @@
       @reset-calibration="onResetCalibration"
       @clear-balls="clearBalls"
       @reset-physics="onResetPhysics"
+      @reset-detection="onResetDetection"
       @toggle-fullscreen="toggleFullscreen"
       @update:debug="debug = $event"
       @update:showWebcamBg="showWebcamBg = $event"
-      @update:autoHide="autoHide = $event"
       @update:spawnInterval="phys.spawnInterval = $event; pushPhysicsSettings()"
       @update:ballSize="phys.ballSize = $event; pushPhysicsSettings()"
       @update:bounciness="phys.bounciness = $event; pushPhysicsSettings()"
@@ -63,6 +69,7 @@
       @update:satMin="det.satMin = $event; pushDetectionSettings()"
       @update:valMin="det.valMin = $event; pushDetectionSettings()"
       @update:minBlobArea="det.minBlobArea = $event; pushDetectionSettings()"
+      @pick-color="onPickColor"
     />
 
     <!-- Status overlay (only when not yet running) -->
@@ -80,8 +87,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
-import Matter from 'matter-js'
+import { ref, reactive, computed, watch, watchEffect, onMounted, onUnmounted } from 'vue'
 
 import ProjectorCanvas from './components/ProjectorCanvas.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -97,33 +103,44 @@ import { useDetection } from './composables/useDetection.js'
 const appState = ref('idle')
 const debug = ref(false)
 const showWebcamBg = ref(false)
+const showMarkers = ref(true)
+const physicsPaused = ref(false)
 const settingsOpen = ref(false)
-const autoHide = ref(true)
 
 // Canvas ref
 let _canvas = null
 const canvasWidth  = () => _canvas?.width ?? window.innerWidth
 const canvasHeight = () => _canvas?.height ?? window.innerHeight
 
-// Reactive settings objects
-const phys = reactive({ spawnInterval: 430, ballSize: 11, bounciness: 0.80, gravity: 0.85, maxBalls: 300 })
-const det  = reactive({ hueMin: 15, hueMax: 70, satMin: 8, valMin: 55, minBlobArea: 50 })
+// Reactive settings objects – loaded from localStorage with defaults
+const _physDefaults = { spawnInterval: 430, ballSize: 11, bounciness: 0.80, gravity: 0.85, maxBalls: 300 }
+const _detDefaults  = { hueMin: 15, hueMax: 70, satMin: 8, valMin: 55, minBlobArea: 50 }
+function _loadStorage(key, defaults) {
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem(key) || '{}') } } catch { return { ...defaults } }
+}
+const phys = reactive(_loadStorage('dm-phys', _physDefaults))
+const det  = reactive(_loadStorage('dm-det',  _detDefaults))
 
 // ---------------------------------------------------------------------------
 // Composables
 // ---------------------------------------------------------------------------
 const { videoEl, ready: webcamReady, startWebcam, stopWebcam, captureFrame } = useWebcam()
-const { engine, startPhysics, stopPhysics, syncStaticBodies, updateSettings: updatePhysSettings, clearBalls } = usePhysics(canvasWidth, canvasHeight)
+const { engine, ballCount, startPhysics, stopPhysics, syncStaticBodies, updateSettings: updatePhysSettings, clearBalls, pausePhysics, resumePhysics } = usePhysics(canvasWidth, canvasHeight)
 const { isCalibrated, calibrationMarkers, calibrationQuality, calibrate, transformPoint, resetCalibration } = useCalibration()
 const { detectedRects, startDetection, stopDetection, updateSettings: updateDetSettings } = useDetection()
 
-function pushPhysicsSettings()  { updatePhysSettings({ ...phys }) }
-function pushDetectionSettings() { updateDetSettings({ ...det }) }
+function pushPhysicsSettings()  { updatePhysSettings({ ...phys }); localStorage.setItem('dm-phys', JSON.stringify({ ...phys })) }
+function pushDetectionSettings() { updateDetSettings({ ...det }); localStorage.setItem('dm-det', JSON.stringify({ ...det })) }
 
 function onResetPhysics() {
   clearBalls()
-  Object.assign(phys, { spawnInterval: 430, ballSize: 11, bounciness: 0.80, gravity: 0.85, maxBalls: 300 })
+  Object.assign(phys, _physDefaults)
   pushPhysicsSettings()
+}
+
+function onResetDetection() {
+  Object.assign(det, _detDefaults)
+  pushDetectionSettings()
 }
 
 // ---------------------------------------------------------------------------
@@ -132,10 +149,6 @@ function onResetPhysics() {
 const fps = ref(0)
 const calibProgress = reactive({ step: 0, total: 1, message: '' })
 const canvasComponent = ref(null)
-const ballCount = computed(() => {
-  if (!engine.value) return 0
-  return Matter.Composite.allBodies(engine.value.world).filter(b => !b.isStatic).length
-})
 const stickyCount = computed(() => detectedRects.value.length)
 
 // ---------------------------------------------------------------------------
@@ -170,7 +183,7 @@ async function onStart() {
   }
   _startFpsPolling()
   appState.value = 'running'
-  startDetection(captureFrame, _scaledTransform())
+  startDetection(() => videoEl.value, _scaledTransform())
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +200,7 @@ async function onToggleWebcam() {
     await startWebcam()
     _startFpsPolling()
     appState.value = 'running'
-    startDetection(captureFrame, _scaledTransform())
+    startDetection(() => videoEl.value, _scaledTransform())
   } catch (err) {
     console.error('[App] Webcam error:', err)
     appState.value = err?.name === 'NotAllowedError' ? 'cam-denied' : 'error'
@@ -205,32 +218,33 @@ async function onCalibrate() {
     calibProgress.message = message
   })
   appState.value = 'running'
-  startDetection(captureFrame, ok ? (x, y) => transformPoint(x, y) : _scaledTransform())
+  startDetection(() => videoEl.value, ok ? (x, y) => transformPoint(x, y) : _scaledTransform())
   if (!ok) console.warn('[App] Calibration did not succeed — using identity transform')
 }
 
 function onSkipCalibration() {
   stopDetection()
   appState.value = 'running'
-  startDetection(captureFrame, _scaledTransform())
+  startDetection(() => videoEl.value, _scaledTransform())
 }
 
 function onResetCalibration() {
   resetCalibration()
   stopDetection()
   if (appState.value === 'running') {
-    startDetection(captureFrame, _scaledTransform())
+    startDetection(() => videoEl.value, _scaledTransform())
   }
 }
 
-/** Build a transform that scales webcam (640×480) → canvas size when uncalibrated */
+/** Build a transform that scales webcam → canvas size when uncalibrated */
 function _scaledTransform() {
   if (isCalibrated.value) {
     return (x, y) => transformPoint(x, y)
   }
   return (x, y) => {
     const cw = canvasWidth(), ch = canvasHeight()
-    const ww = 640, wh = 480
+    const ww = videoEl.value?.videoWidth || 640
+    const wh = videoEl.value?.videoHeight || 480
     return { x: (x / ww) * cw, y: (y / wh) * ch }
   }
 }
@@ -245,7 +259,7 @@ function _startFpsPolling() {
 // ---------------------------------------------------------------------------
 // Sync stickies → physics
 // ---------------------------------------------------------------------------
-watch(detectedRects, rects => syncStaticBodies(rects), { deep: true })
+watch(detectedRects, rects => syncStaticBodies(rects))
 
 // ---------------------------------------------------------------------------
 // Canvas callbacks
@@ -258,15 +272,99 @@ function onCanvasResize() {}
 // ---------------------------------------------------------------------------
 function onKeyDown(e) {
   const key = e.key.toLowerCase()
+  
+  // Universal shortcuts
   if (key === 'h') settingsOpen.value = !settingsOpen.value
   else if (key === 'f') toggleFullscreen()
   else if (key === 'd') debug.value = !debug.value
   else if (key === 'c' && webcamReady.value && appState.value !== 'calibrating') onCalibrate()
+  
+  // Debug-only shortcuts
+  else if (debug.value) {
+    if (key === 'r') clearBalls()
+    else if (key === 'b') showWebcamBg.value = !showWebcamBg.value
+    else if (key === 'm') showMarkers.value = !showMarkers.value
+    else if (key === ' ') {
+      e.preventDefault()
+      if (physicsPaused.value) {
+        resumePhysics()
+        physicsPaused.value = false
+      } else {
+        pausePhysics()
+        physicsPaused.value = true
+      }
+    }
+    else if (key === 'escape') emergencyReset()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Debug helper functions
+// ---------------------------------------------------------------------------
+function emergencyReset() {
+  clearBalls()
+  stopDetection()
+  physicsPaused.value = false
+  resumePhysics()
+  onResetPhysics()
+  if (appState.value === 'running') {
+    startDetection(() => videoEl.value, _scaledTransform())
+  }
+  console.log('[Debug] Emergency reset')
 }
 
 function toggleFullscreen() {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {})
   else document.exitFullscreen().catch(() => {})
+}
+
+const pickingColor = ref(false)
+
+function onPickColor() {
+  if (!videoEl.value || !webcamReady.value) return
+  pickingColor.value = true
+  // Temporarily show webcam bg so user can see what they're picking
+  if (!showWebcamBg.value) showWebcamBg.value = true
+}
+
+function onCanvasClick(e) {
+  if (!pickingColor.value) return
+  pickingColor.value = false
+  const vid = videoEl.value
+  if (!vid || vid.readyState < 2) return
+
+  // Sample pixel from video at click position
+  const rect = _canvas.getBoundingClientRect()
+  const sx = (e.clientX - rect.left) / rect.width
+  const sy = (e.clientY - rect.top) / rect.height
+  const tmp = document.createElement('canvas')
+  tmp.width = vid.videoWidth
+  tmp.height = vid.videoHeight
+  const tctx = tmp.getContext('2d')
+  tctx.drawImage(vid, 0, 0)
+  const px = Math.round(sx * vid.videoWidth)
+  const py = Math.round(sy * vid.videoHeight)
+  const [r, g, b] = tctx.getImageData(px, py, 1, 1).data
+  // RGB → HSV
+  const rf = r / 255, gf = g / 255, bf = b / 255
+  const max = Math.max(rf, gf, bf)
+  const min = Math.min(rf, gf, bf)
+  const d = max - min
+  let h = 0
+  if (d !== 0) {
+    if (max === rf) h = ((gf - bf) / d + (gf < bf ? 6 : 0)) / 6
+    else if (max === gf) h = ((bf - rf) / d + 2) / 6
+    else h = ((rf - gf) / d + 4) / 6
+  }
+  const hDeg = Math.round(h * 360)
+  const s = max === 0 ? 0 : Math.round((d / max) * 100)
+  const v = Math.round(max * 100)
+  det.hueMin = Math.max(0, hDeg - 25)
+  det.hueMax = Math.min(360, hDeg + 25)
+  det.satMin = Math.max(5, Math.min(s - 30, 40))
+  det.valMin = Math.max(20, Math.min(v - 30, 60))
+  pushDetectionSettings()
+  console.log(`[Pick] rgb(${r},${g},${b}) → H${hDeg}° S${s}% V${v}% → range ${det.hueMin}-${det.hueMax}°`)
 }
 </script>
 
@@ -276,6 +374,25 @@ function toggleFullscreen() {
   height: 100vh;
   overflow: hidden;
   background: #000;
+}
+
+.pick-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  cursor: crosshair;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 40px;
+}
+.pick-hint {
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  pointer-events: none;
 }
 
 .status-overlay {

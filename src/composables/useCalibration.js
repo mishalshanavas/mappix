@@ -22,6 +22,7 @@
  */
 import { ref } from 'vue'
 import {
+  sleep,
   drawGrayPattern,
   captureGrayscale,
   captureAveragedGrayscale,
@@ -39,10 +40,6 @@ const MIN_CONTRAST    = 25    // minimum (white−black) brightness for validity
 const SAMPLE_GRID     = 8     // correspondence sampling grid (8×8 = up to 64 points)
 const MAX_RETRIES     = 2     // calibration attempts
 const REPROJ_ACCEPT   = 8     // max mean reprojection error (px) to accept
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms))
-}
 
 export function useCalibration() {
   const isCalibrated = ref(false)

@@ -11,75 +11,35 @@
 // ---------------------------------------------------------------------------
 
 /** Convert sRGB (0-255) → HSV  h:0-360, s:0-100, v:0-100 */
-export function rgbToHsv(r, g, b) {
-  r /= 255; g /= 255; b /= 255
-  const max = Math.max(r, g, b)
-  const min = Math.min(r, g, b)
-  const d = max - min
-  let h = 0
-  if (d !== 0) {
-    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
-    else if (max === g) h = ((b - r) / d + 2) / 6
-    else h = ((r - g) / d + 4) / 6
-  }
-  return { h: h * 360, s: max === 0 ? 0 : (d / max) * 100, v: max * 100 }
-}
-
 // ---------------------------------------------------------------------------
-// Colour masks  (return Uint8Array, 1 = pixel passes, length = width*height)
-// ---------------------------------------------------------------------------
-
-/** Yellow sticky note mask   H: 20-65°, S≥35%, V≥40% */
-export function yellowMask(imageData) {
-  const { data, width, height } = imageData
-  const mask = new Uint8Array(width * height)
-  for (let i = 0; i < width * height; i++) {
-    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2]
-    const { h, s, v } = rgbToHsv(r, g, b)
-    if (h >= 20 && h <= 65 && s >= 35 && v >= 40) mask[i] = 1
-  }
-  return mask
-}
-
-/** Green calibration marker mask   H: 90-165°, S≥30%, V≥25% */
-export function greenMask(imageData) {
-  const { data, width, height } = imageData
-  const mask = new Uint8Array(width * height)
-  for (let i = 0; i < width * height; i++) {
-    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2]
-    const { h, s, v } = rgbToHsv(r, g, b)
-    if (h >= 90 && h <= 165 && s >= 30 && v >= 25) mask[i] = 1
-  }
-  return mask
-}
-
-// ---------------------------------------------------------------------------
-// Morphology (separable 1-D passes for performance)
+// Morphology (O(n) sliding-window separable passes)
 // ---------------------------------------------------------------------------
 
 function dilate1D(mask, width, height, radius, horizontal) {
   const out = new Uint8Array(mask.length)
   if (horizontal) {
     for (let y = 0; y < height; y++) {
+      const row = y * width
+      let count = 0
+      for (let x = 0; x <= radius && x < width; x++) count += mask[row + x]
       for (let x = 0; x < width; x++) {
-        const base = y * width
-        let v = 0
-        for (let dx = -radius; dx <= radius && !v; dx++) {
-          const nx = x + dx
-          if (nx >= 0 && nx < width) v = mask[base + nx]
-        }
-        out[base + x] = v
+        if (count > 0) out[row + x] = 1
+        const a = x + radius + 1
+        if (a < width) count += mask[row + a]
+        const r = x - radius
+        if (r >= 0) count -= mask[row + r]
       }
     }
   } else {
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let v = 0
-        for (let dy = -radius; dy <= radius && !v; dy++) {
-          const ny = y + dy
-          if (ny >= 0 && ny < height) v = mask[ny * width + x]
-        }
-        out[y * width + x] = v
+    for (let x = 0; x < width; x++) {
+      let count = 0
+      for (let y = 0; y <= radius && y < height; y++) count += mask[y * width + x]
+      for (let y = 0; y < height; y++) {
+        if (count > 0) out[y * width + x] = 1
+        const a = y + radius + 1
+        if (a < height) count += mask[a * width + x]
+        const r = y - radius
+        if (r >= 0) count -= mask[r * width + x]
       }
     }
   }
@@ -88,27 +48,34 @@ function dilate1D(mask, width, height, radius, horizontal) {
 
 function erode1D(mask, width, height, radius, horizontal) {
   const out = new Uint8Array(mask.length)
+  const full = 2 * radius + 1
   if (horizontal) {
     for (let y = 0; y < height; y++) {
+      const row = y * width
+      let count = 0
+      for (let x = 0; x <= radius && x < width; x++) count += mask[row + x]
       for (let x = 0; x < width; x++) {
-        const base = y * width
-        let v = 1
-        for (let dx = -radius; dx <= radius && v; dx++) {
-          const nx = x + dx
-          if (nx < 0 || nx >= width || !mask[base + nx]) v = 0
-        }
-        out[base + x] = v
+        const wl = Math.max(0, x - radius)
+        const wr = Math.min(width - 1, x + radius)
+        out[row + x] = (wr - wl + 1 === full && count === full) ? 1 : 0
+        const a = x + radius + 1
+        if (a < width) count += mask[row + a]
+        const r = x - radius
+        if (r >= 0) count -= mask[row + r]
       }
     }
   } else {
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let v = 1
-        for (let dy = -radius; dy <= radius && v; dy++) {
-          const ny = y + dy
-          if (ny < 0 || ny >= height || !mask[ny * width + x]) v = 0
-        }
-        out[y * width + x] = v
+    for (let x = 0; x < width; x++) {
+      let count = 0
+      for (let y = 0; y <= radius && y < height; y++) count += mask[y * width + x]
+      for (let y = 0; y < height; y++) {
+        const wt = Math.max(0, y - radius)
+        const wb = Math.min(height - 1, y + radius)
+        out[y * width + x] = (wb - wt + 1 === full && count === full) ? 1 : 0
+        const a = y + radius + 1
+        if (a < height) count += mask[a * width + x]
+        const r = y - radius
+        if (r >= 0) count -= mask[r * width + x]
       }
     }
   }
@@ -210,7 +177,7 @@ export function findBlobs(mask, width, height, minArea = 200) {
       const root = ufFind(parent, labels[i])
       let b = stats.get(root)
       if (!b) {
-        b = { minX: x, maxX: x, minY: y, maxY: y, sumX: 0, sumY: 0, count: 0, edgePixels: [] }
+        b = { minX: x, maxX: x, minY: y, maxY: y, sumX: 0, sumY: 0, count: 0, edgeXY: [] }
         stats.set(root, b)
       }
       if (x < b.minX) b.minX = x
@@ -223,15 +190,18 @@ export function findBlobs(mask, width, height, minArea = 200) {
       const isEdge =
         x === 0 || x === width - 1 || y === 0 || y === height - 1 ||
         !mask[i - 1] || !mask[i + 1] || !mask[i - width] || !mask[i + width]
-      if (isEdge) b.edgePixels.push({ x, y })
+      if (isEdge) b.edgeXY.push(x, y)
     }
   }
 
   const blobs = []
   for (const b of stats.values()) {
     if (b.count >= minArea) {
-      // Simplify edge pixels via convex hull
-      const hull = convexHull(b.edgePixels)
+      // Convert flat edge array to points, then compute convex hull
+      const n = b.edgeXY.length >> 1
+      const edgePts = new Array(n)
+      for (let k = 0; k < n; k++) edgePts[k] = { x: b.edgeXY[k * 2], y: b.edgeXY[k * 2 + 1] }
+      const hull = convexHull(edgePts)
       blobs.push({
         x: b.minX, y: b.minY,
         w: b.maxX - b.minX + 1,
@@ -244,94 +214,4 @@ export function findBlobs(mask, width, height, minArea = 200) {
     }
   }
   return blobs
-}
-
-// ---------------------------------------------------------------------------
-// Frame helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Compute per-pixel absolute difference between two ImageData objects.
- * Returns a new ImageData with the result.
- */
-export function absDiff(imgA, imgB) {
-  const result = new Uint8ClampedArray(imgA.data.length)
-  for (let i = 0; i < imgA.data.length; i++) {
-    result[i] = Math.abs(imgA.data[i] - imgB.data[i])
-  }
-  return new ImageData(result, imgA.width, imgA.height)
-}
-
-/**
- * Downsample an ImageData by integer factor (nearest-neighbour).
- * Returns a new ImageData of size (floor(w/factor), floor(h/factor)).
- */
-export function downsample(imageData, factor) {
-  const sw = imageData.width, sh = imageData.height
-  const dw = Math.floor(sw / factor), dh = Math.floor(sh / factor)
-  const out = new Uint8ClampedArray(dw * dh * 4)
-  const src = imageData.data
-  for (let y = 0; y < dh; y++) {
-    for (let x = 0; x < dw; x++) {
-      const si = (y * factor * sw + x * factor) * 4
-      const di = (y * dw + x) * 4
-      out[di]     = src[si]
-      out[di + 1] = src[si + 1]
-      out[di + 2] = src[si + 2]
-      out[di + 3] = 255
-    }
-  }
-  return new ImageData(out, dw, dh)
-}
-
-// ---------------------------------------------------------------------------
-// Brightness mask (for calibration diff images)
-// ---------------------------------------------------------------------------
-
-/**
- * Binary mask where average brightness (R+G+B)/3 exceeds threshold (0-255).
- * More robust than HSV-based masks on absDiff images.
- */
-export function brightnessMask(imageData, threshold = 50) {
-  const { data, width, height } = imageData
-  const mask = new Uint8Array(width * height)
-  for (let i = 0; i < width * height; i++) {
-    const avg = (data[i * 4] + data[i * 4 + 1] + data[i * 4 + 2]) / 3
-    if (avg > threshold) mask[i] = 1
-  }
-  return mask
-}
-
-// ---------------------------------------------------------------------------
-// Multi-frame averaging
-// ---------------------------------------------------------------------------
-
-/**
- * Capture `count` frames via captureFrame(), average pixel values.
- * Reduces temporal noise by ~sqrt(count).
- * @param {Function} captureFrame — returns offscreen canvas with current webcam frame
- * @param {number} count — number of frames to average
- * @param {number} delayMs — ms between captures (default 50)
- * @returns {Promise<ImageData|null>}
- */
-export async function averageFrames(captureFrame, count = 5, delayMs = 50) {
-  const frames = []
-  for (let i = 0; i < count; i++) {
-    const canvas = captureFrame()
-    if (!canvas) return null
-    const ctx = canvas.getContext('2d')
-    frames.push(ctx.getImageData(0, 0, canvas.width, canvas.height))
-    if (i < count - 1) await new Promise(r => setTimeout(r, delayMs))
-  }
-
-  const { width, height } = frames[0]
-  const acc = new Float32Array(width * height * 4)
-  for (const frame of frames) {
-    for (let i = 0; i < frame.data.length; i++) acc[i] += frame.data[i]
-  }
-
-  const out = new Uint8ClampedArray(acc.length)
-  const invN = 1 / count
-  for (let i = 0; i < acc.length; i++) out[i] = Math.round(acc[i] * invN)
-  return new ImageData(out, width, height)
 }

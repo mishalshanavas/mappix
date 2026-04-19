@@ -3,10 +3,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import Matter from 'matter-js'
-
-const { Composite } = Matter
 
 const props = defineProps({
   engine: {        // Matter.js engine instance (shallowRef value)
@@ -40,6 +38,18 @@ const props = defineProps({
   videoEl: {
     type: Object,
     default: null
+  },
+  calibrationQuality: {
+    type: Object,
+    default: null
+  },
+  maxBalls: {
+    type: Number,
+    default: null
+  },
+  physicsPaused: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -50,11 +60,15 @@ let rafId = null
 let _lastFpsTime = performance.now()
 let _frameCount = 0
 let _fps = 0
+let _ctx = null
+let _lastRafTime = performance.now()
+let _frameMs = 16.7  // EMA of frame delta
 
 // Expose the canvas element to parent
 onMounted(() => {
   const canvas = canvasRef.value
   resizeCanvas(canvas)
+  _ctx = canvas.getContext('2d')
   emit('canvas-ready', canvas)
   rafId = requestAnimationFrame(renderLoop)
   window.addEventListener('resize', onResize)
@@ -81,12 +95,14 @@ function renderLoop(now) {
   rafId = requestAnimationFrame(renderLoop)
 
   const canvas = canvasRef.value
-  if (!canvas) return
-  const ctx = canvas.getContext('2d')
+  if (!canvas || !_ctx) return
+  const ctx = _ctx
   const W = canvas.width
   const H = canvas.height
 
-  // --- FPS counter ---
+  // --- FPS counter + frame time ---
+  _frameMs = _frameMs * 0.85 + (now - _lastRafTime) * 0.15
+  _lastRafTime = now
   _frameCount++
   if (now - _lastFpsTime >= 1000) {
     _fps = _frameCount
@@ -111,21 +127,19 @@ function renderLoop(now) {
 
   // === Draw physics bodies ===
   if (props.engine) {
-    const bodies = Composite.allBodies(props.engine.world)
+    const bodies = props.engine.world.bodies
 
     for (const body of bodies) {
       if (body.label === 'ball') {
         drawBall(ctx, body)
-      } else if (body.label === 'sticky' && props.debug) {
-        drawStickyOutline(ctx, body)
       }
     }
   }
 
-  // === Draw detected contour outlines (debug only) ===
-  if (props.debug && props.detectedRects.length) {
-    ctx.strokeStyle = 'rgba(0, 200, 255, 0.6)'
-    ctx.lineWidth = 1.5
+  // === Draw detected object outlines ===
+  if (props.detectedRects.length) {
+    ctx.strokeStyle = props.debug ? 'rgba(0, 200, 255, 0.6)' : 'rgba(160,160,160,0.6)'
+    ctx.lineWidth = props.debug ? 1.5 : 2
     for (const rect of props.detectedRects) {
       const pts = rect.hull || rect.corners
       if (!pts || pts.length < 3) continue
@@ -144,11 +158,9 @@ function renderLoop(now) {
     drawTrackingMarkers(ctx, W, H)
   }
 
-  // === Debug: FPS ===
+  // === Debug overlay (F3-style) ===
   if (props.debug) {
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'
-    ctx.font = '16px monospace'
-    ctx.fillText(`${_fps} fps`, 14, 24)
+    drawDebugOverlay(ctx, W, H)
   }
 }
 
@@ -161,19 +173,6 @@ function drawBall(ctx, body) {
   ctx.arc(x, y, radius, 0, Math.PI * 2)
   ctx.fillStyle = `rgba(255,255,255,${opacity.toFixed(3)})`
   ctx.fill()
-}
-
-function drawStickyOutline(ctx, body) {
-  const verts = body.vertices
-  if (!verts || verts.length < 3) return
-
-  ctx.strokeStyle = 'rgba(160,160,160,0.6)'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(verts[0].x, verts[0].y)
-  for (let i = 1; i < verts.length; i++) ctx.lineTo(verts[i].x, verts[i].y)
-  ctx.closePath()
-  ctx.stroke()
 }
 
 /** Draw permanent corner brackets + centre cross for position tracking */
@@ -212,6 +211,86 @@ function drawTrackingMarkers(ctx, W, H) {
   ctx.moveTo(P, H / 2); ctx.lineTo(P + tick, H / 2)          // left mid
   ctx.moveTo(W - P, H / 2); ctx.lineTo(W - P - tick, H / 2)  // right mid
   ctx.stroke()
+}
+
+/** Minecraft F3-style debug overlay */
+function drawDebugOverlay(ctx, W, H) {
+  ctx.save()
+  ctx.textBaseline = 'top'
+  const FONT = '11px monospace'
+  ctx.font = FONT
+  const LH = 13   // line height
+  const PX = 3    // horizontal pad
+  const PY = 1    // vertical pad
+
+  // --- gather data ---
+  let dynCount = 0, staticCount = 0
+  if (props.engine?.world) {
+    for (const b of props.engine.world.bodies) {
+      if (b.isStatic) staticCount++
+      else dynCount++
+    }
+  }
+  const cq  = props.calibrationQuality
+  const mem = (typeof performance !== 'undefined') && performance.memory
+  const fpsColor = _fps >= 50 ? '#55FF55' : _fps >= 25 ? '#FFFF55' : '#FF5555'
+
+  // Lines: array of [{t, c}] — empty array = blank spacer
+  const left = [
+    [{ t: `${_fps} fps`, c: fpsColor }, { t: `  (${_frameMs.toFixed(1)} ms)`, c: '#aaaaaa' }],
+    [{ t: `${W} × ${H} px`, c: '#ffffff' }],
+    [],
+    [{ t: 'state: ', c: '#aaaaaa' }, { t: props.appState, c: '#55FFFF' }, ...(props.physicsPaused ? [{ t: '  PAUSED', c: '#FFFF00' }] : [])],
+    [{ t: 'webcam bg: ', c: '#aaaaaa' }, { t: props.showWebcamBg ? 'on' : 'off', c: props.showWebcamBg ? '#55FF55' : '#aaaaaa' }],
+    [{ t: 'markers: ', c: '#aaaaaa' }, { t: props.showMarkers ? 'on' : 'off', c: props.showMarkers ? '#55FF55' : '#aaaaaa' }],
+    [],
+    ...(mem ? [[{ t: 'heap: ', c: '#aaaaaa' }, { t: `${(mem.usedJSHeapSize / 1e6).toFixed(1)} MB`, c: '#ffffff' }, { t: ` / ${(mem.jsHeapSizeLimit / 1e6).toFixed(0)} MB`, c: '#555555' }]] : []),
+  ]
+
+  const right = [
+    [{ t: 'balls: ', c: '#aaaaaa' }, { t: `${dynCount}`, c: '#ffffff' }, { t: ` / ${props.maxBalls ?? '?'}`, c: '#555555' }],
+    [{ t: 'stickies: ', c: '#aaaaaa' }, { t: `${staticCount}`, c: '#ffffff' }],
+    [{ t: 'blobs: ', c: '#aaaaaa' }, { t: `${props.detectedRects.length}`, c: '#ffffff' }],
+    [],
+    cq
+      ? [{ t: 'calib err: ', c: '#aaaaaa' }, { t: `${cq.error} px`, c: '#55FF55' }]
+      : [{ t: 'calibration: ', c: '#aaaaaa' }, { t: 'none', c: '#FF5555' }],
+    ...(cq ? [
+      [{ t: 'inliers: ', c: '#aaaaaa' }, { t: `${cq.inliers}/${cq.total}`, c: '#ffffff' }],
+      [{ t: 'coverage: ', c: '#aaaaaa' }, { t: `${cq.validPct}%`, c: '#ffffff' }],
+    ] : []),
+    [],
+    [{ t: 'detection: ', c: '#aaaaaa' }, { t: '5 Hz', c: '#ffffff' }],
+    [{ t: 'bodies total: ', c: '#aaaaaa' }, { t: `${dynCount + staticCount}`, c: '#ffffff' }],
+    [],
+    [{ t: 'DEBUG KEYS:', c: '#FFFF55' }],
+    [{ t: 'R', c: '#55FFFF' }, { t: '=clear  ', c: '#aaaaaa' }, { t: 'B', c: '#55FFFF' }, { t: '=bg  ', c: '#aaaaaa' }, { t: 'M', c: '#55FFFF' }, { t: '=markers', c: '#aaaaaa' }],
+    [{ t: 'SPC', c: '#55FFFF' }, { t: '=pause  ', c: '#aaaaaa' }, { t: 'ESC', c: '#55FFFF' }, { t: '=reset', c: '#aaaaaa' }],
+  ]
+
+  function drawLines(lines, startX, rightAlign, offsetY = 0) {
+    for (let i = 0; i < lines.length; i++) {
+      const parts = lines[i]
+      if (!parts.length) continue   // blank spacer
+      const y = (offsetY || 8) + i * LH
+      let totalW = 0
+      for (const p of parts) totalW += ctx.measureText(p.t).width
+      const x0 = rightAlign ? W - 8 - totalW - PX : startX - PX
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'
+      ctx.fillRect(x0, y - PY, totalW + PX * 2, LH + PY)
+      let tx = x0 + PX
+      for (const p of parts) {
+        ctx.fillStyle = p.c
+        ctx.fillText(p.t, tx, y)
+        tx += ctx.measureText(p.t).width
+      }
+    }
+  }
+
+  drawLines(left, 8, false)
+  const rightStartY = Math.max(left.length * LH + 16, 8)
+  drawLines(right, 0, true, rightStartY)
+  ctx.restore()
 }
 
 // Expose canvas ref and fps for parent

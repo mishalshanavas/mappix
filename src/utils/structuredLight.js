@@ -10,7 +10,7 @@
  * making decoding robust at stripe boundaries.
  */
 
-function sleep(ms) {
+export function sleep(ms) {
   return new Promise(r => setTimeout(r, ms))
 }
 
@@ -98,7 +98,7 @@ export function captureGrayscale(captureFrame) {
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const gray = new Uint8Array(img.width * img.height)
   for (let i = 0; i < gray.length; i++) {
-    gray[i] = Math.round((img.data[i * 4] + img.data[i * 4 + 1] + img.data[i * 4 + 2]) / 3)
+    gray[i] = Math.round(0.299 * img.data[i * 4] + 0.587 * img.data[i * 4 + 1] + 0.114 * img.data[i * 4 + 2])
   }
   return { data: gray, width: img.width, height: img.height }
 }
