@@ -1,5 +1,13 @@
 <template>
-  <div class="settings-panel" :class="{ open }">
+  <div
+    class="settings-panel"
+    :class="{ open, 'auto-hide': autoHide, 'hover-visible': hoverVisible }"
+    @mouseenter="onMouseEnter"
+    @mouseleave="onMouseLeave"
+  >
+    <!-- Hover trigger zone (only in auto-hide mode) -->
+    <div v-if="autoHide && !open" class="hover-trigger" />
+
     <!-- Toggle button (always visible) -->
     <button class="toggle-btn" @click="$emit('toggle')" :title="open ? 'Hide settings' : 'Show settings'">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -8,7 +16,7 @@
       </svg>
     </button>
 
-    <div class="panel-body" v-show="open">
+    <div class="panel-body" v-show="open || hoverVisible">
       <h2 class="panel-title">Settings</h2>
 
       <!-- ============== STATUS ============== -->
@@ -139,6 +147,10 @@
           <span>Debug Outlines</span>
           <input type="checkbox" :checked="debug" @change="$emit('update:debug', $event.target.checked)">
         </label>
+        <label class="toggle-row">
+          <span>Auto-hide Panel</span>
+          <input type="checkbox" :checked="autoHide" @change="$emit('update:autoHide', $event.target.checked)">
+        </label>
       </section>
 
       <!-- ============== STATS ============== -->
@@ -168,6 +180,7 @@ import { ref, watch } from 'vue'
 
 const props = defineProps({
   open:           { type: Boolean, default: true },
+  autoHide:       { type: Boolean, default: true },
   appState:       { type: String, default: 'idle' },
   webcamOn:       { type: Boolean, default: false },
   isCalibrated:   { type: Boolean, default: false },
@@ -207,6 +220,7 @@ defineEmits([
   'toggle-fullscreen',
   'update:debug',
   'update:showWebcamBg',
+  'update:autoHide',
   'update:spawnInterval',
   'update:ballSize',
   'update:bounciness',
@@ -220,6 +234,19 @@ defineEmits([
 ])
 
 const videoRef = ref(null)
+const hoverVisible = ref(false)
+let _hideTimeout = null
+
+function onMouseEnter() {
+  if (!props.autoHide || props.open) return
+  if (_hideTimeout) { clearTimeout(_hideTimeout); _hideTimeout = null }
+  hoverVisible.value = true
+}
+
+function onMouseLeave() {
+  if (!props.autoHide) return
+  _hideTimeout = setTimeout(() => { hoverVisible.value = false }, 400)
+}
 
 const statusMap = {
   idle:        { cls: 'grey', text: 'Ready — start webcam' },
@@ -256,6 +283,27 @@ watch(() => props.open, () => {
   flex-direction: row;
   pointer-events: none;
   font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Auto-hide: slide toggle-btn off screen when panel not hovered */
+.settings-panel.auto-hide:not(.open):not(.hover-visible) .toggle-btn {
+  transform: translateX(-48px);
+  opacity: 0;
+  pointer-events: none;
+}
+.toggle-btn {
+  transition: background 0.2s, transform 0.25s ease, opacity 0.25s ease;
+}
+
+/* Hover trigger zone — invisible strip along left edge */
+.hover-trigger {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 100vh;
+  pointer-events: auto;
+  z-index: 9002;
 }
 
 .toggle-btn {

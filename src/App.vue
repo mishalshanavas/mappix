@@ -9,6 +9,8 @@
       :calibrationMarkers="calibrationMarkers"
       :showMarkers="true"
       :detectedRects="detectedRects"
+      :showWebcamBg="showWebcamBg"
+      :videoEl="videoEl"
       @canvas-ready="onCanvasReady"
       @resize="onCanvasResize"
     />
@@ -16,6 +18,7 @@
     <!-- Settings panel (left sidebar) -->
     <SettingsPanel
       :open="settingsOpen"
+      :autoHide="autoHide"
       :appState="appState"
       :webcamOn="webcamReady"
       :isCalibrated="isCalibrated"
@@ -49,6 +52,7 @@
       @toggle-fullscreen="toggleFullscreen"
       @update:debug="debug = $event"
       @update:showWebcamBg="showWebcamBg = $event"
+      @update:autoHide="autoHide = $event"
       @update:spawnInterval="phys.spawnInterval = $event; pushPhysicsSettings()"
       @update:ballSize="phys.ballSize = $event; pushPhysicsSettings()"
       @update:bounciness="phys.bounciness = $event; pushPhysicsSettings()"
@@ -93,7 +97,8 @@ import { useDetection } from './composables/useDetection.js'
 const appState = ref('idle')
 const debug = ref(false)
 const showWebcamBg = ref(false)
-const settingsOpen = ref(true)
+const settingsOpen = ref(false)
+const autoHide = ref(true)
 
 // Canvas ref
 let _canvas = null

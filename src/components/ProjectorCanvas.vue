@@ -32,6 +32,14 @@ const props = defineProps({
   detectedRects: { // detected sticky rects (for drawing outlines always)
     type: Array,
     default: () => []
+  },
+  showWebcamBg: {
+    type: Boolean,
+    default: false
+  },
+  videoEl: {
+    type: Object,
+    default: null
   }
 })
 
@@ -93,6 +101,13 @@ function renderLoop(now) {
 
   ctx.fillStyle = '#000000'
   ctx.fillRect(0, 0, W, H)
+
+  // === Webcam background ===
+  if (props.showWebcamBg && props.videoEl && props.videoEl.readyState >= 2) {
+    ctx.globalAlpha = 0.35
+    ctx.drawImage(props.videoEl, 0, 0, W, H)
+    ctx.globalAlpha = 1.0
+  }
 
   // === Draw physics bodies ===
   if (props.engine) {
