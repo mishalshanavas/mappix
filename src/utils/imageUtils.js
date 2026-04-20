@@ -91,6 +91,15 @@ export function morphClose(mask, width, height, radius = 4) {
   return m
 }
 
+/** Morphological open (erode then dilate) — removes small noise specks */
+export function morphOpen(mask, width, height, radius = 2) {
+  let m = erode1D(mask, width, height, radius, true)
+  m = erode1D(m, width, height, radius, false)
+  m = dilate1D(m, width, height, radius, true)
+  m = dilate1D(m, width, height, radius, false)
+  return m
+}
+
 // ---------------------------------------------------------------------------
 // Convex hull (Andrew's monotone chain)
 // ---------------------------------------------------------------------------

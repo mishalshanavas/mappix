@@ -36,10 +36,14 @@ export function useWebcam() {
     video.muted = true
     await video.play()
 
-    // Try to lock exposure so calibration frames are consistent
+    // Try to lock exposure & white balance so calibration frames are consistent
     try {
       const track = stream.value.getVideoTracks()[0]
-      await track.applyConstraints({ advanced: [{ exposureMode: 'manual' }] })
+      const caps = track.getCapabilities?.() || {}
+      const adv = []
+      if (caps.exposureMode) adv.push({ exposureMode: 'manual' })
+      if (caps.whiteBalanceMode) adv.push({ whiteBalanceMode: 'manual' })
+      if (adv.length) await track.applyConstraints({ advanced: adv })
     } catch (_) {
       // Not supported on all browsers — silently skip
     }
@@ -78,5 +82,39 @@ export function useWebcam() {
     return _offscreenCanvas
   }
 
-  return { videoEl, stream, ready, startWebcam, stopWebcam, captureFrame }
+  /**
+   * Wait until the video element has a genuinely new frame.
+   * Uses requestVideoFrameCallback when available, falls back to polling currentTime.
+   */
+  function waitForNewFrame(timeoutMs = 500) {
+    const video = videoEl.value
+    if (!video) return Promise.resolve()
+
+    // Preferred: requestVideoFrameCallback (Chrome 83+, Edge, Opera)
+    if ('requestVideoFrameCallback' in video) {
+      return new Promise(resolve => {
+        const timer = setTimeout(resolve, timeoutMs)
+        video.requestVideoFrameCallback(() => {
+          clearTimeout(timer)
+          resolve()
+        })
+      })
+    }
+
+    // Fallback: poll until currentTime changes
+    const startTime = video.currentTime
+    return new Promise(resolve => {
+      const deadline = performance.now() + timeoutMs
+      function poll() {
+        if (video.currentTime !== startTime || performance.now() > deadline) {
+          resolve()
+        } else {
+          requestAnimationFrame(poll)
+        }
+      }
+      requestAnimationFrame(poll)
+    })
+  }
+
+  return { videoEl, stream, ready, startWebcam, stopWebcam, captureFrame, waitForNewFrame }
 }

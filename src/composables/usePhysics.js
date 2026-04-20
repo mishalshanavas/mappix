@@ -150,11 +150,33 @@ export function usePhysics(getWidth, getHeight) {
     _stickyBodies = []
     for (const rect of rects) {
       const existing = kept.get(rect.id)
-      if (existing) {
-        // Update position only — avoids expensive poly decomposition
+
+      // Check if hull has changed enough to warrant body recreation
+      let needsRecreate = !existing
+      if (existing && rect.hull && rect.hull.length >= 3 && existing._hullSnap) {
+        const prev = existing._hullSnap
+        const cur = rect.hull
+        if (prev.length === cur.length) {
+          let maxDrift = 0
+          for (let i = 0; i < cur.length; i++) {
+            const dx = cur[i].x - prev[i].x, dy = cur[i].y - prev[i].y
+            maxDrift = Math.max(maxDrift, dx * dx + dy * dy)
+          }
+          // Recreate if any hull point moved > 4px (accumulated EMA drift)
+          if (maxDrift > 16) needsRecreate = true
+        } else {
+          needsRecreate = true
+        }
+      }
+
+      if (existing && !needsRecreate) {
+        // Update position only — shape hasn't drifted enough
         Body.setPosition(existing, { x: rect.cx, y: rect.cy })
         _stickyBodies.push(existing)
       } else {
+        // Remove old body if recreating
+        if (existing) Composite.remove(world, existing)
+
         let body
         if (rect.hull && rect.hull.length >= 3) {
           const verts = rect.hull.map(p => ({ x: p.x, y: p.y }))
@@ -175,6 +197,8 @@ export function usePhysics(getWidth, getHeight) {
         }
         if (body) {
           body._rectId = rect.id
+          // Snapshot hull for drift detection
+          body._hullSnap = rect.hull ? rect.hull.map(p => ({ x: p.x, y: p.y })) : null
           Composite.add(world, body)
           _stickyBodies.push(body)
         }

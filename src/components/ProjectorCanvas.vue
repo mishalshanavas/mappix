@@ -50,6 +50,10 @@ const props = defineProps({
   physicsPaused: {
     type: Boolean,
     default: false
+  },
+  targetFps: {
+    type: Number,
+    default: 60
   }
 })
 
@@ -94,6 +98,10 @@ function resizeCanvas(canvas) {
 function renderLoop(now) {
   rafId = requestAnimationFrame(renderLoop)
 
+  // --- Frame-rate limiter ---
+  const minInterval = 1000 / (props.targetFps || 60)
+  if (now - _lastRafTime < minInterval * 0.92) return
+
   const canvas = canvasRef.value
   if (!canvas || !_ctx) return
   const ctx = _ctx
@@ -118,10 +126,17 @@ function renderLoop(now) {
   ctx.fillStyle = '#000000'
   ctx.fillRect(0, 0, W, H)
 
-  // === Webcam background ===
+  // === Webcam background (aspect-ratio preserving, zoom to fill) ===
   if (props.showWebcamBg && props.videoEl && props.videoEl.readyState >= 2) {
+    const vw = props.videoEl.videoWidth || 640
+    const vh = props.videoEl.videoHeight || 480
+    const scale = Math.max(W / vw, H / vh)
+    const dw = vw * scale
+    const dh = vh * scale
+    const dx = (W - dw) / 2
+    const dy = (H - dh) / 2
     ctx.globalAlpha = 0.35
-    ctx.drawImage(props.videoEl, 0, 0, W, H)
+    ctx.drawImage(props.videoEl, dx, dy, dw, dh)
     ctx.globalAlpha = 1.0
   }
 

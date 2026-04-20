@@ -161,7 +161,7 @@ export function applyHomography(H, x, y) {
  * @param {number} iterations — number of RANSAC iterations (default 50)
  * @returns {{ H: number[], inliers: number, error: number }}
  */
-export function computeHomographyRANSAC(srcPts, dstPts, threshold = 5, iterations = 50) {
+export function computeHomographyRANSAC(srcPts, dstPts, threshold = 5, iterations = 200) {
   const n = srcPts.length
   if (n < 4) throw new Error('Need at least 4 correspondences for RANSAC')
 
@@ -235,7 +235,7 @@ export function computeHomographyRANSAC(srcPts, dstPts, threshold = 5, iteration
     } catch { /* keep previous bestH */ }
   }
 
-  const finalError = _meanReprojError(bestH, srcPts, dstPts)
+  const finalError = _meanReprojError(bestH, inlierSrc.length >= 4 ? inlierSrc : srcPts, inlierSrc.length >= 4 ? inlierDst : dstPts)
   return { H: bestH, inliers: bestInliers, error: finalError }
 }
 

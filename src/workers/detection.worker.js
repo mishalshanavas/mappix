@@ -11,7 +11,7 @@
  * transformPoint is a main-thread function.
  */
 
-import { morphClose, findBlobs } from '../utils/imageUtils.js'
+import { morphClose, morphOpen, findBlobs } from '../utils/imageUtils.js'
 
 /** Downsample RGBA pixels by integer factor (nearest-neighbour, no ImageData API needed). */
 function downsampleRaw(src, srcW, srcH, factor) {
@@ -76,7 +76,10 @@ self.onmessage = ({ data: msg }) => {
   const { data, width: dw, height: dh } = img
 
   let mask = yellowMask(data, dw * dh, settings)
-  mask = morphClose(mask, dw, dh, 4)
+  // morphOpen removes small noise specks (especially on top edge from reflections)
+  mask = morphOpen(mask, dw, dh, 2)
+  // morphClose fills small gaps within the blob
+  mask = morphClose(mask, dw, dh, 3)
   const blobs = findBlobs(mask, dw, dh, settings.minBlobArea)
 
   self.postMessage({ blobs })

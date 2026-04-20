@@ -49,11 +49,16 @@
         <p class="sp-section-label">Calibration</p>
         <div class="sp-btn-group">
           <button class="sp-btn" @click="$emit('calibrate')" :disabled="!webcamOn || appState === 'calibrating'">
-            {{ isCalibrated ? 'Re-calibrate' : 'Calibrate' }}
+            {{ isCalibrated ? 'Re-calibrate' : 'Auto Calibrate' }}
           </button>
-          <button class="sp-btn ghost" @click="$emit('skip-calibration')" :disabled="!webcamOn">Skip</button>
+          <button class="sp-btn ghost" @click="$emit('manual-calibrate')" :disabled="!webcamOn || appState === 'calibrating'">
+            Manual
+          </button>
         </div>
-        <button class="sp-btn destructive" @click="$emit('reset-calibration')" :disabled="!isCalibrated">Reset</button>
+        <div class="sp-btn-group" style="margin-top:4px">
+          <button class="sp-btn ghost" @click="$emit('skip-calibration')" :disabled="!webcamOn">Skip</button>
+          <button class="sp-btn destructive" @click="$emit('reset-calibration')" :disabled="!isCalibrated">Reset</button>
+        </div>
         <div v-if="appState === 'calibrating'" class="sp-progress">
           <div class="sp-progress-bar">
             <div class="sp-progress-fill" :style="{ width: (calibTotal > 0 ? (calibStep / calibTotal) * 100 : 0) + '%' }" />
@@ -96,7 +101,17 @@
         </button>
 
         <template v-if="advancedOpen">
-          <p class="sp-group-label">Physics</p>
+          <p class="sp-group-label">Performance</p>
+          <div class="sp-slider">
+            <div class="sp-slider-meta">
+              <span>Target FPS <button class="sp-info" type="button">?<span class="sp-tooltip">Lower FPS reduces CPU/GPU load. Affects rendering and detection rate.</span></button></span>
+              <span class="sp-slider-val">{{ props.targetFps }}</span>
+            </div>
+            <input type="range" min="10" max="60" step="5" :value="props.targetFps"
+              @input="$emit('update:targetFps', +$event.target.value)">
+          </div>
+
+          <p class="sp-group-label" style="margin-top:14px">Physics</p>
           <div class="sp-slider" v-for="s in physicsSliders" :key="s.key">
             <div class="sp-slider-meta">
               <span>{{ s.label }}</span>
@@ -202,14 +217,16 @@ const props = defineProps({
   calibTotal:         { type: Number, default: 1 },
   calibMessage:       { type: String, default: '' },
   calibrationQuality: { type: Object, default: null },
+  targetFps:          { type: Number, default: 60 },
 })
 
 const emit = defineEmits([
-  'toggle', 'toggle-webcam', 'calibrate', 'skip-calibration', 'reset-calibration',
+  'toggle', 'toggle-webcam', 'calibrate', 'manual-calibrate', 'skip-calibration', 'reset-calibration',
   'clear-balls', 'reset-physics', 'reset-detection', 'toggle-fullscreen',
   'update:debug', 'update:showWebcamBg',
   'update:spawnInterval', 'update:ballSize', 'update:bounciness', 'update:gravity', 'update:maxBalls',
   'update:hueMin', 'update:hueMax', 'update:satMin', 'update:valMin', 'update:minBlobArea',
+  'update:targetFps',
   'pick-color',
 ])
 

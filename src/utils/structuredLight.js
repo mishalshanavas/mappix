@@ -183,6 +183,79 @@ export function decodeCorrespondenceMap(
 }
 
 // ---------------------------------------------------------------------------
+// Spatial consistency filter — removes isolated bit-flip errors
+// ---------------------------------------------------------------------------
+
+/**
+ * Filter the decoded correspondence map for spatial consistency.
+ * For each valid pixel, compare its decoded projector coords to the median
+ * of its valid neighbors in a small window. If the deviation exceeds
+ * `maxDev` projector pixels, invalidate it.
+ *
+ * @param {Float32Array} mapX — projector X per camera pixel
+ * @param {Float32Array} mapY — projector Y per camera pixel
+ * @param {Uint8Array} valid — validity mask (modified in place)
+ * @param {number} camW, camH — camera dimensions
+ * @param {number} projW, projH — projector dimensions
+ * @param {number} radius — neighborhood radius (default 2 → 5×5 window)
+ */
+export function filterCorrespondenceMap(mapX, mapY, valid, camW, camH, projW, projH, radius = 2) {
+  // Expected projector-pixel stride per camera pixel
+  const strideX = projW / camW
+  const strideY = projH / camH
+  // Allow deviation of up to 3× the local stride (handles perspective distortion)
+  const maxDevX = Math.max(4, strideX * 3 * (2 * radius + 1))
+  const maxDevY = Math.max(4, strideY * 3 * (2 * radius + 1))
+
+  // Work on a copy so we don't invalidate pixels that are needed as neighbors
+  const filtered = new Uint8Array(valid)
+  const buf = []
+
+  for (let cy = radius; cy < camH - radius; cy++) {
+    for (let cx = radius; cx < camW - radius; cx++) {
+      const i = cy * camW + cx
+      if (!valid[i]) continue
+
+      // Gather valid neighbor projector coords
+      buf.length = 0
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (dx === 0 && dy === 0) continue
+          const j = (cy + dy) * camW + (cx + dx)
+          if (valid[j]) buf.push(j)
+        }
+      }
+
+      if (buf.length < 3) { filtered[i] = 0; continue }
+
+      // Median of neighbor X values
+      buf.sort((a, b) => mapX[a] - mapX[b])
+      const medX = mapX[buf[buf.length >> 1]]
+
+      // Median of neighbor Y values
+      buf.sort((a, b) => mapY[a] - mapY[b])
+      const medY = mapY[buf[buf.length >> 1]]
+
+      if (Math.abs(mapX[i] - medX) > maxDevX || Math.abs(mapY[i] - medY) > maxDevY) {
+        filtered[i] = 0
+      }
+    }
+  }
+
+  // Also invalidate border pixels (no full neighborhood available)
+  for (let cy = 0; cy < camH; cy++) {
+    for (let cx = 0; cx < camW; cx++) {
+      if (cy < radius || cy >= camH - radius || cx < radius || cx >= camW - radius) {
+        filtered[cy * camW + cx] = 0
+      }
+    }
+  }
+
+  // Copy back
+  valid.set(filtered)
+}
+
+// ---------------------------------------------------------------------------
 // Correspondence sampling
 // ---------------------------------------------------------------------------
 
@@ -221,11 +294,20 @@ export function sampleCorrespondences(mapX, mapY, valid, camW, camH, gridSize = 
 
       if (pts.length < 10) continue
 
-      // Sort by projector X and pick the median — robust to outlier pixels
-      pts.sort((a, b) => a.px - b.px)
+      // 2D median: find point closest to (medianX, medianY) for robust center
       const mid = Math.floor(pts.length / 2)
-      srcPts.push([pts[mid].cx, pts[mid].cy])
-      dstPts.push([pts[mid].px, pts[mid].py])
+      pts.sort((a, b) => a.px - b.px)
+      const medPx = pts[mid].px
+      pts.sort((a, b) => a.py - b.py)
+      const medPy = pts[mid].py
+
+      let bestDist = Infinity, bestPt = pts[mid]
+      for (const p of pts) {
+        const d = (p.px - medPx) ** 2 + (p.py - medPy) ** 2
+        if (d < bestDist) { bestDist = d; bestPt = p }
+      }
+      srcPts.push([bestPt.cx, bestPt.cy])
+      dstPts.push([bestPt.px, bestPt.py])
     }
   }
 
