@@ -83,8 +83,16 @@
           <button class="sp-btn" @click="$emit('clear-balls')">Clear Balls</button>
           <button class="sp-btn ghost" @click="$emit('toggle-fullscreen')">Fullscreen</button>
         </div>
+        <button class="sp-ghost-pill" @click="$emit('open-tour')">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-1px;margin-right:4px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          Setup guide
+        </button>
         <div class="sp-row">
-          <span>Debug outlines</span>
+            <span>Show outlines</span>
+            <button class="sp-toggle" :class="{ on: showOutlines }" @click="$emit('update:showOutlines', !showOutlines)" />
+          </div>
+          <div class="sp-row">
+            <span>Debug outlines</span>
           <button class="sp-toggle" :class="{ on: debug }" @click="$emit('update:debug', !debug)" />
         </div>
       </div>
@@ -218,12 +226,13 @@ const props = defineProps({
   calibMessage:       { type: String, default: '' },
   calibrationQuality: { type: Object, default: null },
   targetFps:          { type: Number, default: 60 },
+  showOutlines:       { type: Boolean, default: true },
 })
 
 const emit = defineEmits([
   'toggle', 'toggle-webcam', 'calibrate', 'manual-calibrate', 'skip-calibration', 'reset-calibration',
-  'clear-balls', 'reset-physics', 'reset-detection', 'toggle-fullscreen',
-  'update:debug', 'update:showWebcamBg',
+  'clear-balls', 'reset-physics', 'reset-detection', 'toggle-fullscreen', 'open-tour',
+  'update:debug', 'update:showWebcamBg', 'update:showOutlines',
   'update:spawnInterval', 'update:ballSize', 'update:bounciness', 'update:gravity', 'update:maxBalls',
   'update:hueMin', 'update:hueMax', 'update:satMin', 'update:valMin', 'update:minBlobArea',
   'update:targetFps',

@@ -54,6 +54,10 @@ const props = defineProps({
   targetFps: {
     type: Number,
     default: 60
+  },
+  showOutlines: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -152,7 +156,7 @@ function renderLoop(now) {
   }
 
   // === Draw detected object outlines ===
-  if (props.detectedRects.length) {
+  if (props.showOutlines && props.detectedRects.length) {
     ctx.strokeStyle = props.debug ? 'rgba(0, 200, 255, 0.6)' : 'rgba(160,160,160,0.6)'
     ctx.lineWidth = props.debug ? 1.5 : 2
     for (const rect of props.detectedRects) {

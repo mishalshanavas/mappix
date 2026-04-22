@@ -14,6 +14,7 @@
       :maxBalls="phys.maxBalls"
       :physicsPaused="physicsPaused"
       :calibrationQuality="calibrationQuality"
+      :showOutlines="showOutlines"
       :targetFps="perf.targetFps"
       @canvas-ready="onCanvasReady"
       @resize="onCanvasResize"
@@ -120,8 +121,10 @@
       @reset-physics="onResetPhysics"
       @reset-detection="onResetDetection"
       @toggle-fullscreen="toggleFullscreen"
+      :showOutlines="showOutlines"
       @update:debug="debug = $event"
       @update:showWebcamBg="showWebcamBg = $event"
+      @update:showOutlines="showOutlines = $event"
       @update:spawnInterval="phys.spawnInterval = $event; pushPhysicsSettings()"
       @update:ballSize="phys.ballSize = $event; pushPhysicsSettings()"
       @update:bounciness="phys.bounciness = $event; pushPhysicsSettings()"
@@ -134,6 +137,7 @@
       @update:minBlobArea="det.minBlobArea = $event; pushDetectionSettings()"
       @update:targetFps="perf.targetFps = $event; pushPerfSettings()"
       @pick-color="onPickColor"
+      @open-tour="tourVisible = true"
     />
 
     <!-- Mobile blocker -->
@@ -145,36 +149,17 @@
       <p>mappix requires a webcam and a large screen.<br>Please open this on a desktop or laptop.</p>
     </div>
 
-    <!-- Status overlay (only when not yet running) -->
+    <!-- Setup tour -->
     <Transition name="fade">
-      <div v-if="appState === 'idle'" class="status-overlay">
-        <div class="status-box">
-          <!-- Logo -->
-          <img class="start-icon" src="/mepii.svg" alt="mappix" width="64" height="64" />
-          <h1 class="start-title">mappix</h1>
-          <p class="start-sub">Interactive physics playground powered by your webcam</p>
-          <button class="start-btn" @click="onStart">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Start
-          </button>
-          <p class="start-hint">Webcam access required · press <kbd>H</kbd> for settings</p>
-
-          <div class="start-steps">
-            <div class="start-step">
-              <div class="step-num">1</div>
-              <span>Allow camera access</span>
-            </div>
-            <div class="start-step">
-              <div class="step-num">2</div>
-              <span>Calibrate projector → webcam</span>
-            </div>
-            <div class="start-step">
-              <div class="step-num">3</div>
-              <span>Pick sticky-note colour</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SetupTour
+        v-if="appState === 'idle' || tourVisible"
+        :cameraState="tourCameraState"
+        :closeable="appState !== 'idle'"
+        @request-camera="onTourCameraRequest"
+        @calibrate="tourVisible = false; onCalibrate()"
+        @skip-calibration="tourVisible = false; onSkipCalibration()"
+        @close="tourVisible = false"
+      />
     </Transition>
   </div>
 </template>
@@ -184,6 +169,7 @@ import { ref, reactive, computed, watch, watchEffect, onMounted, onUnmounted } f
 
 import ProjectorCanvas from './components/ProjectorCanvas.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import SetupTour from './components/SetupTour.vue'
 
 import { useWebcam } from './composables/useWebcam.js'
 import { usePhysics } from './composables/usePhysics.js'
@@ -196,9 +182,12 @@ import { useDetection } from './composables/useDetection.js'
 const appState = ref('idle')
 const debug = ref(false)
 const showWebcamBg = ref(false)
+const showOutlines = ref(true)
 const showMarkers = ref(true)
 const physicsPaused = ref(false)
 const settingsOpen = ref(false)
+const tourVisible = ref(false)
+const tourCameraState = ref('idle') // 'idle' | 'loading' | 'ready' | 'denied'
 
 // Canvas ref
 let _canvas = null
@@ -264,6 +253,29 @@ onUnmounted(() => {
   stopPhysics()
   stopWebcam()
   if (_fpsTimer) clearInterval(_fpsTimer)
+})
+
+// ---------------------------------------------------------------------------
+// Tour camera request (step 3 of SetupTour)
+// ---------------------------------------------------------------------------
+async function onTourCameraRequest() {
+  if (webcamReady.value) { tourCameraState.value = 'ready'; return }
+  tourCameraState.value = 'loading'
+  try {
+    await startWebcam()
+    _startFpsPolling()
+    setTargetFps(perf.targetFps)
+    tourCameraState.value = 'ready'
+  } catch (err) {
+    console.error('[App] Tour camera error:', err)
+    tourCameraState.value = 'denied'
+  }
+}
+
+// Keep tourCameraState in sync with actual webcam state
+watch(webcamReady, ready => {
+  if (ready) tourCameraState.value = 'ready'
+  else if (tourCameraState.value === 'ready') tourCameraState.value = 'idle'
 })
 
 // ---------------------------------------------------------------------------
@@ -672,108 +684,6 @@ function onCanvasClick(e) {
   .status-overlay, .sp, .pick-overlay { display: none !important; }
 }
 
-.status-overlay {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 100;
-}
-
-.status-box {
-  background: rgba(9, 9, 11, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 40px 48px;
-  text-align: center;
-  font-family: system-ui, sans-serif;
-  pointer-events: auto;
-  max-width: 400px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.start-icon { margin-bottom: 12px; }
-
-.start-title {
-  color: #fafafa;
-  font-size: 22px;
-  font-weight: 600;
-  margin: 0 0 4px;
-  letter-spacing: -0.02em;
-}
-.start-sub {
-  color: #71717a;
-  font-size: 13px;
-  margin: 0 0 24px;
-  font-weight: 400;
-}
-
-.start-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: #fafafa;
-  color: #09090b;
-  border: none;
-  border-radius: 10px;
-  padding: 12px 36px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: system-ui, sans-serif;
-  transition: background 0.15s, transform 0.1s;
-}
-.start-btn:hover { background: #e4e4e7; }
-.start-btn:active { transform: scale(0.97); }
-
-.start-hint {
-  color: rgba(255,255,255,0.3);
-  font-size: 12px;
-  margin: 12px 0 0;
-  font-weight: 400;
-}
-.start-hint kbd {
-  display: inline-block;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-size: 11px;
-  font-family: inherit;
-  color: rgba(255,255,255,0.5);
-}
-
-.start-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 28px;
-  padding-top: 20px;
-  border-top: 1px solid rgba(255,255,255,0.06);
-}
-.start-step {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-align: left;
-  color: #a1a1aa;
-  font-size: 13px;
-}
-.step-num {
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  border: 1px solid #3f3f46;
-  color: #71717a;
-  font-size: 11px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.4s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
