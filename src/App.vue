@@ -142,7 +142,7 @@
         <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>
       </svg>
       <h2>Desktop Only</h2>
-      <p>dynamic-mapper requires a webcam and a large screen.<br>Please open this on a desktop or laptop.</p>
+      <p>mappix requires a webcam and a large screen.<br>Please open this on a desktop or laptop.</p>
     </div>
 
     <!-- Status overlay (only when not yet running) -->
@@ -150,8 +150,8 @@
       <div v-if="appState === 'idle'" class="status-overlay">
         <div class="status-box">
           <!-- Logo -->
-          <img class="start-icon" src="/mepii.svg" alt="dynamic-mapper" width="64" height="64" />
-          <h1 class="start-title">dynamic-mapper</h1>
+          <img class="start-icon" src="/mepii.svg" alt="mappix" width="64" height="64" />
+          <h1 class="start-title">mappix</h1>
           <p class="start-sub">Interactive physics playground powered by your webcam</p>
           <button class="start-btn" @click="onStart">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>

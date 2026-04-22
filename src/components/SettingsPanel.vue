@@ -15,7 +15,7 @@
 
       <!-- Header -->
       <div class="sp-header">
-        <span class="sp-title">dynamic-mapper</span>
+        <span class="sp-title">mappix</span>
         <span class="sp-status" :class="statusClass">{{ statusText }}</span>
       </div>
 

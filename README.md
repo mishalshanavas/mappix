@@ -1,4 +1,4 @@
-# dynamic-mapper
+# mappix
 
 A browser-based AR physics sandbox where a projector throws falling balls that bounce off real physical objects — like sticky notes on a wall — detected live by a webcam.
 

@@ -31,8 +31,8 @@ import {
 } from '../utils/structuredLight.js'
 import { computeHomography, computeHomographyRANSAC, applyHomography } from '../utils/homography.js'
 
-const STORAGE_KEY       = 'dynamic-mapper:calibration-H'
-const CORNERS_KEY       = 'dynamic-mapper:calibration-corners'
+const STORAGE_KEY       = 'mappix:calibration-H'
+const CORNERS_KEY       = 'mappix:calibration-corners'
 
 const SETTLE_MS       = 250   // ms after projecting each pattern before capture
 const SETTLE_INIT_MS  = 600   // longer settle for initial white/black frames
