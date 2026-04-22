@@ -1,79 +1,68 @@
-# mappix
+# Mappix
 
-A browser-based AR physics sandbox where a projector throws falling balls that bounce off real physical objects — like sticky notes on a wall — detected live by a webcam.
+<img width="1200" height="350" alt="Mappix" src="https://github.com/user-attachments/assets/e0c8b3a1-4689-4b9f-b673-24e74baa7bf7" />
 
-Point a webcam at your wall, stick some yellow post-its up, run the app on a projector, and watch white physics balls rain down and interact with whatever is on the wall in real time.
+Stick notes on a wall. Watch physics balls bounce off them. That's it. That's the project.
 
----
-
-## How it works
-
-**Detection** — the webcam feed is processed entirely in the browser using pure JavaScript (no OpenCV, no WASM). Yellow objects are detected via HSV masking, blob detection, and convex hull extraction at 5 Hz.
-
-**Calibration** — press *Calibrate* and the app runs a **Gray-code structured light** sequence: it projects a series of binary stripe patterns onto the wall, reads them back through the webcam, and computes a per-pixel projector↔camera correspondence map. From that map it builds a robust homography via RANSAC. This is the same technique used by tools like TouchDesigner and RoomAlive — zero blob matching, zero ambiguity.
-
-**Physics** — [Matter.js](https://brm.io/matter-js/) handles everything. Detected objects become static rigid bodies. Balls spawn from the top-centre and cascade down, bouncing off whatever the camera sees.
+**[→ Open Mappix](https://mappix.isacool.monster/)** — no install, just open in the browser on the machine driving the projector.
 
 ---
 
-## Stack
+## What You Need
 
-| Layer | Tech |
-|---|---|
-| UI framework | Vue 3 (Composition API, `<script setup>`) |
-| Bundler | Vite |
-| Physics | Matter.js |
-| Image processing | Pure JS — HSV masking, union-find blob detection, convex hull |
-| Calibration | Gray-code structured light + normalised DLT homography + RANSAC |
-| Camera | `getUserMedia` 640×480 |
+- A projector aimed at a wall
+- A webcam with a clear view of the same wall
+- Some yellow sticky notes — or any bright object; yellow is just the default (configurable in settings)
 
-No runtime dependencies beyond Vue and Matter.js.
+The webcam and projector don't need to be perfectly aligned — that's what calibration is for.
 
 ---
 
-## Getting started
+## Hardware Setup
+
+<div align="center">
+  <img width="300" alt="webcam" src="https://github.com/user-attachments/assets/bd8cbd01-6d11-4f0d-8ec1-abe6f2bbecca" />
+</div>
+
+1. Mount your projector so it covers the wall area you want to use
+2. Position the webcam so it can see the full projected area — off to the side or above works fine
+3. Make sure the room isn't so bright that the projector image washes out; the camera needs to read the patterns during calibration
+
+---
+
+## Calibration
+
+Calibration maps every projector pixel to its corresponding camera pixel using a Gray-code structured light sequence. You only need to redo this if the projector or camera moves.
+
+1. Clear the wall of people and moving objects
+2. Click **Calibrate** in the sidebar
+3. The projector will flash a series of black-and-white stripe patterns for ~7 seconds — don't cover the wall during this
+4. When it finishes, a quality score is shown. Anything above 60% is solid; re-run if it's lower
+5. Calibration is saved to `localStorage` — it persists across page reloads
+
+> If you just want to try it quickly, hit **Skip** instead. The app will use proportional scaling, which works reasonably well when the camera is centred and close to the projector.
+
+---
+
+## Running
+
+1. Stick yellow post-its on the wall (or hold up any yellow object)
+2. Click **Start** and grant camera permission
+3. Balls start falling from the top and bounce off whatever the camera detects
+4. Tune detection sensitivity from the sidebar if objects aren't being picked up — adjust **Hue Range**, **Sat Min**, and **Val Min** to match your lighting
+
+
+## Running Locally (Optional)
 
 ```bash
+git clone https://github.com/mishalshanavas/mappix.git
+cd mappix
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` on whatever machine is driving the projector. The app runs fullscreen.
-
-### First run
-
-1. Click **Start** — browser will ask for camera permission
-2. Stick yellow post-its (or any yellow objects) on the wall the projector is aimed at
-3. Hit **Skip (Identity)** if the webcam and projector are roughly aligned — detection will just scale coordinates proportionally
-4. Or hit **Calibrate** to run the full structured light sequence (~7 s) for pixel-accurate mapping
-5. Balls start falling immediately from the top-centre
+Open `http://localhost:5173` in the browser on the machine driving the projector.
 
 ---
 
-## Settings
-
-Everything is live-tuneable from the sidebar:
-
-| Setting | What it does |
-|---|---|
-| Spawn interval | How often a new ball drops |
-| Ball size | Radius in px |
-| Bounciness | Matter.js restitution (0 = dead, 1 = perfect bounce) |
-| Gravity | Gravity scale |
-| Max balls | Oldest ball removed when limit is hit |
-| Hue min / max | Yellow detection hue range (HSV, 0–360°) |
-| Sat min | Minimum saturation — lower this if stickies look washed out under projector light |
-| Val min | Minimum brightness |
-| Min blob area | Ignore blobs smaller than this (in detection pixels) |
-
-Keyboard shortcuts: `H` toggle sidebar · `F` fullscreen
-
----
-
-## Calibration notes
-
-- Keep the wall area clear of people during the ~7 s structured light sequence
-- The projector must be visible to the webcam for calibration to work
-- If it fails, the app falls back to identity (proportional) scaling automatically
-- Re-calibrate any time the projector or camera moves
-
+> Full hardware guide, calibration tuning, and troubleshooting coming in the wiki.
