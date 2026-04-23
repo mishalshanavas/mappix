@@ -63,7 +63,6 @@ export function useDetection() {
   let _detectionInterval = DEFAULT_DETECTION_INTERVAL
   let _getVideoEl = null
 
-  // Live-tuneable settings
   let _s = { hueMin: 15, hueMax: 70, satMin: 8, valMin: 55, minBlobArea: 50 }
 
   // Tracked blob state: { id, cx, cy, w, h, hull, seenFor, missedFor, active }
@@ -78,7 +77,6 @@ export function useDetection() {
     const F = DOWNSAMPLE_FACTOR
     const tp = _transformPoint
 
-    // Build canvas-space detections from raw blobs
     const detections = rawBlobs.map(b => {
       let hull = (b.hull && b.hull.length >= 3)
         ? b.hull.map(p => tp(p.x * F, p.y * F))
@@ -94,7 +92,6 @@ export function useDetection() {
       return { cx, cy, w: Math.abs(b.w * F), h: Math.abs(b.h * F), hull }
     })
 
-    // Mark all tracked blobs as not matched this frame
     for (const t of _tracked) t._matchedThisFrame = false
 
     // Greedy nearest-centroid matching
@@ -141,7 +138,6 @@ export function useDetection() {
       }
     }
 
-    // Increment missed counter for unmatched tracked blobs; remove stale
     _tracked = _tracked.filter(t => {
       if (!t._matchedThisFrame) {
         t.missedFor++
@@ -150,10 +146,28 @@ export function useDetection() {
       return t.missedFor < REMOVE_FRAMES
     })
 
-    // Expose only confirmed-active blobs
     detectedRects.value = _tracked
       .filter(t => t.active)
       .map(t => ({ id: t.id, cx: t.cx, cy: t.cy, w: t.w, h: t.h, angle: 0, hull: t.hull }))
+  }
+
+  /** Shared timer tick — captures a frame and sends it to the worker. */
+  async function _tick() {
+    if (_busy) return
+    const video = _getVideoEl?.()
+    if (!video || video.readyState < 2) return
+    _busy = true
+    try {
+      const bmp = await createImageBitmap(video)
+      // Guard against worker being terminated during the async gap above
+      if (!_worker) { _busy = false; return }
+      _worker.postMessage(
+        { bitmap: bmp, settings: { ..._s }, downsampleFactor: DOWNSAMPLE_FACTOR },
+        [bmp]
+      )
+    } catch {
+      _busy = false
+    }
   }
 
   function startDetection(getVideoEl, transformPoint) {
@@ -187,44 +201,16 @@ export function useDetection() {
     }
     _initWorker()
 
-    _timer = setInterval(async () => {
-      if (_busy) return
-      const video = getVideoEl()
-      if (!video || video.readyState < 2) return
-      _busy = true
-      try {
-        const bmp = await createImageBitmap(video)
-        _worker.postMessage(
-          { bitmap: bmp, settings: { ..._s }, downsampleFactor: DOWNSAMPLE_FACTOR },
-          [bmp]
-        )
-      } catch {
-        _busy = false
-      }
-    }, _detectionInterval)
+    _timer = setInterval(_tick, _detectionInterval)
   }
 
   /** Adjust detection rate to match a target FPS. Detection runs at ~1/4 of render FPS. */
   function setTargetFps(fps) {
     _detectionInterval = Math.max(100, Math.round(1000 / Math.max(1, fps / 4)))
-    // Restart timer if running
+    // Restart timer if already running
     if (_timer && _getVideoEl) {
       clearInterval(_timer)
-      _timer = setInterval(async () => {
-        if (_busy) return
-        const video = _getVideoEl()
-        if (!video || video.readyState < 2) return
-        _busy = true
-        try {
-          const bmp = await createImageBitmap(video)
-          _worker.postMessage(
-            { bitmap: bmp, settings: { ..._s }, downsampleFactor: DOWNSAMPLE_FACTOR },
-            [bmp]
-          )
-        } catch {
-          _busy = false
-        }
-      }, _detectionInterval)
+      _timer = setInterval(_tick, _detectionInterval)
     }
   }
 

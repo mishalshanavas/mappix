@@ -226,22 +226,24 @@
           </div>
           <div class="tour-actions">
             <button class="btn-ghost" @click="goTo(3)">Back</button>
-            <button class="btn-primary" @click="$emit('skip-calibration')">Finish</button>
+            <button class="btn-primary" @click="startCalibCountdown()">Finish</button>
           </div>
         </div>
 
         <!-- ── Step 5: Countdown before calibration ── -->
         <div v-else-if="step === 5" key="5" class="tour-step">
-          <div class="tour-hero">
+          <div class="tour-hero calib-hero-warn">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
           </div>
-          <h2 class="tour-h2">Don't move anything</h2>
-          <p class="tour-sub">Keep the projector, webcam, and wall perfectly still. Calibration starts in&hellip;</p>
+          <h2 class="tour-h2 calib-warning-title">Don't Move Anything</h2>
+          <p class="calib-warning-sub">Keep the projector, webcam, and surface <strong>perfectly still</strong>.<br>Ensure everything is <strong>aligned</strong> before calibration starts.</p>
           <div class="calib-countdown">{{ countdown }}</div>
           <p class="calib-countdown-sub">second{{ countdown !== 1 ? 's' : '' }}</p>
+          <p class="calib-duration-hint">Calibration takes ~15 seconds</p>
         </div>
 
       </Transition>
@@ -257,7 +259,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 
 const props = defineProps({
   cameraState: { type: String, default: 'idle' }, // 'idle' | 'loading' | 'ready' | 'denied'
@@ -269,12 +271,15 @@ const emit = defineEmits(['request-camera', 'calibrate', 'skip-calibration', 'cl
 const step = ref(1)
 const slideDir = ref('left')
 const setupMode = ref('projector') // 'projector' | 'laptop'
-const countdown = ref(3)
+const countdown = ref(5)
 let _countdownTimer = null
 
 function startCalibCountdown() {
   goTo(5)
-  countdown.value = 3
+  countdown.value = 6
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {})
+  }
   _countdownTimer = setInterval(() => {
     countdown.value--
     if (countdown.value <= 0) {
@@ -294,6 +299,10 @@ watch(() => props.cameraState, (state) => {
   if (state === 'ready' && step.value === 3) {
     setTimeout(() => goTo(4), 700)
   }
+})
+
+onUnmounted(() => {
+  if (_countdownTimer) clearInterval(_countdownTimer)
 })
 
 const cameraTitle = computed(() => {
@@ -367,6 +376,7 @@ const heroClass = computed(() => ({
   flex-direction: column;
   align-items: center;
   text-align: center;
+  min-height: 430px;
 }
 
 /* ── Hero icon ────────────────────────────────────────────── */
@@ -572,6 +582,28 @@ const heroClass = computed(() => ({
 }
 
 /* ── Calibration countdown ────────────────────────────────── */
+.calib-hero-warn {
+  background: rgba(250, 204, 21, 0.1) !important;
+  border-color: rgba(250, 204, 21, 0.3) !important;
+  color: #facc15 !important;
+}
+.calib-warning-title {
+  font-size: 22px !important;
+  color: #facc15 !important;
+  letter-spacing: -0.02em;
+}
+.calib-warning-sub {
+  font-size: 14px;
+  color: #d4d4d8;
+  margin: 0 0 20px;
+  line-height: 1.6;
+  max-width: 300px;
+  text-align: center;
+}
+.calib-warning-sub strong {
+  color: #fafafa;
+  font-weight: 600;
+}
 .calib-countdown {
   font-size: 72px;
   font-weight: 700;
@@ -584,7 +616,13 @@ const heroClass = computed(() => ({
 .calib-countdown-sub {
   font-size: 13px;
   color: #52525b;
+  margin: 0 0 8px;
+}
+.calib-duration-hint {
+  font-size: 12px;
+  color: #3f3f46;
   margin: 0 0 24px;
+  letter-spacing: 0.01em;
 }
 @keyframes countPulse {
   0%, 100% { transform: scale(1);    opacity: 1; }
@@ -650,6 +688,8 @@ const heroClass = computed(() => ({
   width: 100%;
   justify-content: space-between;
   align-items: center;
+  margin-top: auto;
+  padding-top: 20px;
 }
 .tour-actions.single { justify-content: center; }
 

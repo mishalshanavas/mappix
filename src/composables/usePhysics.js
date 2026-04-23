@@ -134,10 +134,8 @@ export function usePhysics(getWidth, getHeight) {
     if (!engine.value) return
     const world = engine.value.world
 
-    // Build map of incoming rect IDs
     const incomingById = new Map(rects.map(r => [r.id, r]))
 
-    // Remove bodies whose rect is gone, keep existing
     const kept = new Map()
     for (const b of _stickyBodies) {
       if (incomingById.has(b._rectId)) {
@@ -174,7 +172,6 @@ export function usePhysics(getWidth, getHeight) {
         Body.setPosition(existing, { x: rect.cx, y: rect.cy })
         _stickyBodies.push(existing)
       } else {
-        // Remove old body if recreating
         if (existing) Composite.remove(world, existing)
 
         let body

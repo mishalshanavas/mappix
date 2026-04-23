@@ -279,23 +279,6 @@ watch(webcamReady, ready => {
 })
 
 // ---------------------------------------------------------------------------
-// One-click start (idle → running)
-// ---------------------------------------------------------------------------
-async function onStart() {
-  try {
-    await startWebcam()
-  } catch (err) {
-    console.error('[App] Webcam error:', err)
-    appState.value = err?.name === 'NotAllowedError' ? 'cam-denied' : 'error'
-    return
-  }
-  _startFpsPolling()
-  appState.value = 'running'
-  setTargetFps(perf.targetFps)
-  startDetection(() => videoEl.value, _scaledTransform())
-}
-
-// ---------------------------------------------------------------------------
 // Settings-panel actions
 // ---------------------------------------------------------------------------
 async function onToggleWebcam() {
@@ -309,6 +292,7 @@ async function onToggleWebcam() {
     await startWebcam()
     _startFpsPolling()
     appState.value = 'running'
+    setTargetFps(perf.targetFps)
     startDetection(() => videoEl.value, _scaledTransform())
   } catch (err) {
     console.error('[App] Webcam error:', err)
@@ -506,7 +490,7 @@ watch(detectedRects, rects => syncStaticBodies(rects))
 // Canvas callbacks
 // ---------------------------------------------------------------------------
 function onCanvasReady(canvas) { _canvas = canvas }
-function onCanvasResize() {}
+function onCanvasResize() { /* reserved for future layout-dependent logic */ }
 
 // ---------------------------------------------------------------------------
 // Keyboard shortcuts
@@ -600,17 +584,23 @@ function onCanvasClick(e) {
   const vid = videoEl.value
   if (!vid || vid.readyState < 2) return
 
-  // Sample pixel from video at click position
+  // Sample pixel from video at click position, accounting for cover-scale letterbox
   const rect = _canvas.getBoundingClientRect()
-  const sx = (e.clientX - rect.left) / rect.width
-  const sy = (e.clientY - rect.top) / rect.height
+  const canvasX = (e.clientX - rect.left) / rect.width * _canvas.width
+  const canvasY = (e.clientY - rect.top) / rect.height * _canvas.height
+  const cw = _canvas.width, ch = _canvas.height
+  const vw = vid.videoWidth, vh = vid.videoHeight
+  const coverScale = Math.max(cw / vw, ch / vh)
+  const ox = (cw - vw * coverScale) / 2
+  const oy = (ch - vh * coverScale) / 2
+  const px = Math.max(0, Math.min(vw - 1, Math.round((canvasX - ox) / coverScale)))
+  const py = Math.max(0, Math.min(vh - 1, Math.round((canvasY - oy) / coverScale)))
+
   const tmp = document.createElement('canvas')
-  tmp.width = vid.videoWidth
-  tmp.height = vid.videoHeight
+  tmp.width = vw
+  tmp.height = vh
   const tctx = tmp.getContext('2d')
   tctx.drawImage(vid, 0, 0)
-  const px = Math.round(sx * vid.videoWidth)
-  const py = Math.round(sy * vid.videoHeight)
   const [r, g, b] = tctx.getImageData(px, py, 1, 1).data
   // RGB → HSV
   const rf = r / 255, gf = g / 255, bf = b / 255

@@ -103,32 +103,6 @@ export function captureGrayscale(captureFrame) {
   return { data: gray, width: img.width, height: img.height }
 }
 
-/**
- * Capture and average N grayscale frames for noise reduction.
- * Reduces temporal noise by ~sqrt(count).
- */
-export async function captureAveragedGrayscale(captureFrame, count = 2, delayMs = 40) {
-  const frames = []
-  for (let i = 0; i < count; i++) {
-    const f = captureGrayscale(captureFrame)
-    if (!f) return null
-    frames.push(f)
-    if (i < count - 1) await sleep(delayMs)
-  }
-
-  const { width, height } = frames[0]
-  const n = width * height
-  const acc = new Float32Array(n)
-  for (const f of frames) {
-    for (let i = 0; i < n; i++) acc[i] += f.data[i]
-  }
-
-  const result = new Uint8Array(n)
-  const inv = 1 / count
-  for (let i = 0; i < n; i++) result[i] = Math.round(acc[i] * inv)
-  return { data: result, width, height }
-}
-
 // ---------------------------------------------------------------------------
 // Correspondence map decoding
 // ---------------------------------------------------------------------------

@@ -1,8 +1,29 @@
 {
   "name": "mappix",
-  "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Browser-based projector mapping tool — webcam detects physical objects on a wall, physics balls bounce off them in real time. Structured light calibration aligns the projected scene to the physical surface.",
   "type": "module",
+  "author": "mishalshanavas <mishalshanavas8@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://mappix.isacool.monster",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mishalshanavas/mappix.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mishalshanavas/mappix/issues"
+  },
+  "keywords": [
+    "projection-mapping",
+    "dynamic-projection",
+    "computer-vision",
+    "physics-simulation",
+    "homography",
+    "matter-js",
+    "vuejs",
+    "interactive-projection"
+    
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

@@ -1,6 +1,6 @@
 # Mappix
 
-<img width="1200" height="350" alt="Mappix" src="https://github.com/user-attachments/assets/e0c8b3a1-4689-4b9f-b673-24e74baa7bf7" />
+<img width="1200" height="350" alt="Mappix" src="./public/banner.svg" />
 
 Stick notes on a wall. Watch physics balls bounce off them. That's it. That's the project.
 
@@ -21,7 +21,9 @@ The webcam and projector don't need to be perfectly aligned — that's what cali
 ## Hardware Setup
 
 <div align="center">
-  <img width="300" alt="webcam" src="https://github.com/user-attachments/assets/bd8cbd01-6d11-4f0d-8ec1-abe6f2bbecca" />
+  <a href="https://github.com/user-attachments/assets/bd8cbd01-6d11-4f0d-8ec1-abe6f2bbecca">
+    <img width="480" alt="Hardware setup — projector and webcam aimed at the same wall" src="./public/setup.svg" />
+  </a>
 </div>
 
 1. Mount your projector so it covers the wall area you want to use

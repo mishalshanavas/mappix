@@ -199,7 +199,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 
 const props = defineProps({
   open:           { type: Boolean, default: true },
@@ -247,14 +247,6 @@ const physicsSliders = [
   { key: 'maxBalls',      label: 'Max balls',       min: 10,  max: 500,  step: 10,   unit: '' },
 ]
 
-const detectionSliders = [
-  { key: 'hueMin',     label: 'Hue min',      min: 0,   max: 360, step: 1, unit: '°' },
-  { key: 'hueMax',     label: 'Hue max',      min: 0,   max: 360, step: 1, unit: '°' },
-  { key: 'satMin',     label: 'Saturation',   min: 0,   max: 100, step: 1, unit: '%' },
-  { key: 'valMin',     label: 'Brightness',   min: 0,   max: 100, step: 1, unit: '%' },
-  { key: 'minBlobArea',label: 'Min area',     min: 10,  max: 500, step: 5, unit: '' },
-]
-
 const advancedOpen = ref(false)
 
 // Computed center/half-range from hueMin+hueMax
@@ -284,9 +276,6 @@ const statusMap = {
 }
 const statusClass = computed(() => statusMap[props.appState]?.cls || 'idle')
 const statusText  = computed(() => statusMap[props.appState]?.text || props.appState)
-
-onUnmounted(() => {
-})
 </script>
 
 <style scoped>

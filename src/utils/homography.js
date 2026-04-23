@@ -26,7 +26,7 @@ function gaussSolve(A, b) {
     ;[M[col], M[maxRow]] = [M[maxRow], M[col]]
 
     const pivot = M[col][col]
-    if (Math.abs(pivot) < 1e-14) continue
+    if (Math.abs(pivot) < 1e-14) throw new Error('Singular matrix — degenerate point configuration')
 
     // Eliminate column in all other rows
     for (let row = 0; row < n; row++) {

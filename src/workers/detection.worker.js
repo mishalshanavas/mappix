@@ -1,12 +1,11 @@
 /**
  * detection.worker.js — yellow blob detection off the main thread.
  *
- * Receives:  { pixels: Uint8ClampedArray, width, height, settings, downsampleFactor }
- *            (pixels buffer is transferred — zero-copy)
+ * Receives:  { bitmap: ImageBitmap, settings: object, downsampleFactor: number }
+ *            (ImageBitmap is transferred — zero-copy)
  * Posts back: { blobs: Array<{x,y,w,h,hull}> }
- *            (pixels buffer transferred back so caller can reuse it)
  *
- * Performs: downsample → yellow HSV mask → morphological close → blob detection
+ * Performs: downsample → yellow HSV mask → morphological open+close → blob detection
  * Does NOT perform temporal smoothing — that stays on the main thread because
  * transformPoint is a main-thread function.
  */
@@ -63,7 +62,6 @@ self.onmessage = ({ data: msg }) => {
   const { bitmap, settings, downsampleFactor } = msg
   const width = bitmap.width, height = bitmap.height
 
-  // Draw ImageBitmap to OffscreenCanvas and read pixels (all off main thread)
   if (!_osc || _osc.width !== width || _osc.height !== height) {
     _osc = new OffscreenCanvas(width, height)
     _octx = _osc.getContext('2d', { willReadFrequently: true })

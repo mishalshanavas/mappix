@@ -57,6 +57,10 @@ export function useWebcam() {
       stream.value.getTracks().forEach((t) => t.stop())
       stream.value = null
     }
+    if (videoEl.value) {
+      videoEl.value.srcObject = null
+      videoEl.value = null
+    }
     ready.value = false
   }
 
