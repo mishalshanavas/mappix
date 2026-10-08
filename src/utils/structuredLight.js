@@ -10,9 +10,7 @@
  * making decoding robust at stripe boundaries.
  */
 
-export function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms))
-}
+export { sleep } from './async.js'
 
 // ---------------------------------------------------------------------------
 // Gray code conversion
@@ -149,8 +147,8 @@ export function decodeCorrespondenceMap(
     if (binX >= totalV || binY >= totalH) continue
 
     valid[i] = 1
-    mapX[i] = (binX + 0.5) * projW / totalV
-    mapY[i] = (binY + 0.5) * projH / totalH
+    mapX[i] = (Math.floor(binX * projW / totalV) + Math.floor((binX + 1) * projW / totalV)) / 2
+    mapY[i] = (Math.floor(binY * projH / totalH) + Math.floor((binY + 1) * projH / totalH)) / 2
   }
 
   return { mapX, mapY, valid }
@@ -286,4 +284,43 @@ export function sampleCorrespondences(mapX, mapY, valid, camW, camH, gridSize = 
   }
 
   return { srcPts, dstPts }
+}
+
+
+// Aim for at least four camera pixels per stripe when the projection fills the
+// camera. Retry with coarser cells when the projected area is smaller.
+export function patternBits(projectorSize, cameraSize, attempt = 1) {
+  return Math.max(2, Math.min(8, Math.floor(Math.log2(Math.min(projectorSize, cameraSize) / 4)) - (attempt - 1)))
+}
+
+// All pixels decoding to one projector cell share its destination center.
+// Averaging their camera positions avoids treating an arbitrary edge pixel as
+// the cell center. Discard fragmented cells and camera-border truncation.
+export function cellCorrespondences(mapX, mapY, valid, width, height, gridSize = 16) {
+  const cells = new Map()
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const i = y * width + x
+    if (!valid[i]) continue
+    const key = `${mapX[i]},${mapY[i]}`
+    let cell = cells.get(key)
+    if (!cell) {
+      cell = { x: 0, y: 0, count: 0, minX: x, maxX: x, minY: y, maxY: y, px: mapX[i], py: mapY[i] }
+      cells.set(key, cell)
+    }
+    cell.x += x; cell.y += y; cell.count++
+    cell.minX = Math.min(cell.minX, x); cell.maxX = Math.max(cell.maxX, x)
+    cell.minY = Math.min(cell.minY, y); cell.maxY = Math.max(cell.maxY, y)
+  }
+  const samples = new Map()
+  for (const cell of cells.values()) {
+    const boxArea = (cell.maxX - cell.minX + 1) * (cell.maxY - cell.minY + 1)
+    if (cell.count < 4 || cell.count / boxArea < .5 || cell.minX <= 2 || cell.minY <= 2 || cell.maxX >= width - 3 || cell.maxY >= height - 3) continue
+    const x = cell.x / cell.count, y = cell.y / cell.count
+    const gx = Math.floor(x / width * gridSize), gy = Math.floor(y / height * gridSize)
+    const key = gy * gridSize + gx
+    const distance = (x / width * gridSize - gx - .5) ** 2 + (y / height * gridSize - gy - .5) ** 2
+    if (!samples.has(key) || distance < samples.get(key).distance) samples.set(key, { distance, src: [x, y], dst: [cell.px, cell.py] })
+  }
+  const ordered = [...samples.entries()].sort(([a], [b]) => a - b).map(([, value]) => value)
+  return { srcPts: ordered.map(p => p.src), dstPts: ordered.map(p => p.dst) }
 }

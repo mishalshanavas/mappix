@@ -4,14 +4,14 @@
     :class="{ open }"
   >
     <!-- Hamburger tab -->
-    <button class="sp-tab" @click="$emit('toggle')" :title="open ? 'Hide' : 'Show settings'">
+    <button class="sp-tab" :aria-expanded="open" aria-controls="settings-body" :aria-label="open ? 'Hide settings' : 'Show settings'" @click="$emit('toggle')" :title="open ? 'Hide' : 'Show settings'">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path v-if="!open" d="M3 12h18M3 6h18M3 18h18" stroke-linecap="round"/>
         <path v-else d="M18 6L6 18M6 6l12 12" stroke-linecap="round"/>
       </svg>
     </button>
 
-    <div class="sp-body" v-show="open">
+    <div id="settings-body" class="sp-body" v-show="open">
 
       <!-- Header -->
       <div class="sp-header">
@@ -30,14 +30,14 @@
 
       <!-- Camera -->
       <div class="sp-section">
-        <p class="sp-section-label">Camera</p>
-        <button class="sp-btn" @click="$emit('toggle-webcam')" :disabled="appState === 'calibrating'">
+        <CameraSelect :devices="cameras" :modelValue="selectedCamera" :disabled="appState === 'loading' || appState === 'calibrating'" @update:modelValue="$emit('select-camera', $event)" />
+        <button class="sp-btn" @click="$emit('toggle-webcam')" :disabled="appState === 'calibrating' || appState === 'loading'">
           {{ webcamOn ? 'Stop Webcam' : 'Start Webcam' }}
         </button>
         <template v-if="webcamOn">
           <div class="sp-row">
             <span>Show as background</span>
-            <button class="sp-toggle" :class="{ on: showWebcamBg }" @click="$emit('update:showWebcamBg', !showWebcamBg)" />
+            <button class="sp-toggle" :class="{ on: showWebcamBg }" role="switch" :aria-checked="showWebcamBg" aria-label="Show camera background" @click="$emit('update:showWebcamBg', !showWebcamBg)" />
           </div>
         </template>
       </div>
@@ -47,6 +47,7 @@
       <!-- Calibration -->
       <div class="sp-section">
         <p class="sp-section-label">Calibration</p>
+        <p class="sp-calib-help">Auto calibration flashes patterns. Allow 20–30 seconds per attempt. Press Esc to cancel.</p>
         <div class="sp-btn-group">
           <button class="sp-btn" @click="$emit('calibrate')" :disabled="!webcamOn || appState === 'calibrating'">
             {{ isCalibrated ? 'Re-calibrate' : 'Auto Calibrate' }}
@@ -56,8 +57,8 @@
           </button>
         </div>
         <div class="sp-btn-group" style="margin-top:4px">
-          <button class="sp-btn ghost" @click="$emit('skip-calibration')" :disabled="!webcamOn">Skip</button>
-          <button class="sp-btn destructive" @click="$emit('reset-calibration')" :disabled="!isCalibrated">Reset</button>
+          <button class="sp-btn ghost" @click="$emit('skip-calibration')" :disabled="!webcamOn || appState === 'calibrating'">Continue</button>
+          <button class="sp-btn destructive" @click="$emit('reset-calibration')" :disabled="!isCalibrated || appState === 'calibrating'">Reset</button>
         </div>
         <div v-if="appState === 'calibrating'" class="sp-progress">
           <div class="sp-progress-bar">
@@ -76,9 +77,13 @@
 
       <div class="sp-divider" />
 
+      <div v-if="appState === 'detection-error'" class="sp-section">
+        <button class="sp-btn" @click="$emit('retry-detection')">Retry detection</button>
+      </div>
       <!-- Actions -->
       <div class="sp-section">
         <p class="sp-section-label">Actions</p>
+        <button class="sp-btn" :disabled="!webcamOn" :aria-pressed="paused" @click="$emit('toggle-pause')">{{ paused ? 'Resume simulation' : 'Pause simulation' }}</button>
         <div class="sp-btn-group">
           <button class="sp-btn" @click="$emit('clear-balls')">Clear Balls</button>
           <button class="sp-btn ghost" @click="$emit('toggle-fullscreen')">Fullscreen</button>
@@ -89,11 +94,11 @@
         </button>
         <div class="sp-row">
             <span>Show outlines</span>
-            <button class="sp-toggle" :class="{ on: showOutlines }" @click="$emit('update:showOutlines', !showOutlines)" />
+            <button class="sp-toggle" :class="{ on: showOutlines }" role="switch" :aria-checked="showOutlines" aria-label="Show outlines" @click="$emit('update:showOutlines', !showOutlines)" />
           </div>
           <div class="sp-row">
-            <span>Debug outlines</span>
-          <button class="sp-toggle" :class="{ on: debug }" @click="$emit('update:debug', !debug)" />
+            <span>Debug information</span>
+          <button class="sp-toggle" :class="{ on: debug }" role="switch" :aria-checked="debug" aria-label="Show debug information" @click="$emit('update:debug', !debug)" />
         </div>
       </div>
 
@@ -101,7 +106,7 @@
 
       <!-- Advanced collapsible -->
       <div class="sp-section">
-        <button class="sp-collapse-btn" @click="advancedOpen = !advancedOpen">
+        <button class="sp-collapse-btn" :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen">
           <span class="sp-section-label" style="margin:0">Advanced</span>
           <svg class="sp-chevron" :class="{ open: advancedOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <polyline points="6 9 12 15 18 9"/>
@@ -115,7 +120,7 @@
               <span>Target FPS <button class="sp-info" type="button">?<span class="sp-tooltip">Lower FPS reduces CPU/GPU load. Affects rendering and detection rate.</span></button></span>
               <span class="sp-slider-val">{{ props.targetFps }}</span>
             </div>
-            <input type="range" min="10" max="60" step="5" :value="props.targetFps"
+            <input type="range" min="10" max="60" step="5" :value="props.targetFps" aria-label="Target FPS"
               @input="$emit('update:targetFps', +$event.target.value)">
           </div>
 
@@ -125,7 +130,7 @@
               <span>{{ s.label }}</span>
               <span class="sp-slider-val">{{ s.fmt ? s.fmt(props[s.key]) : props[s.key] }}{{ s.unit }}</span>
             </div>
-            <input type="range" :min="s.min" :max="s.max" :step="s.step" :value="props[s.key]"
+            <input :aria-label="s.label" type="range" :min="s.min" :max="s.max" :step="s.step" :value="props[s.key]"
               @input="$emit('update:' + s.key, +$event.target.value)">
           </div>
           <button class="sp-ghost-pill" @click="$emit('reset-physics')">Reset to defaults</button>
@@ -145,7 +150,7 @@
               <span>Color <button class="sp-info" type="button">?<span class="sp-tooltip">Shifts the target colour — match this to the colour of your sticky notes</span></button></span>
               <span class="sp-slider-val">{{ hueCenter }}°</span>
             </div>
-            <input type="range" min="0" max="360" step="1" :value="hueCenter"
+            <input type="range" min="0" max="360" step="1" :value="hueCenter" aria-label="Color"
               @input="onHueCenterChange(+$event.target.value)">
           </div>
 
@@ -155,7 +160,7 @@
               <span>Tolerance <button class="sp-info" type="button">?<span class="sp-tooltip">How wide a colour range to accept — increase if blobs flicker</span></button></span>
               <span class="sp-slider-val">&plusmn;{{ hueHalfRange }}°</span>
             </div>
-            <input type="range" min="5" max="90" step="1" :value="hueHalfRange"
+            <input type="range" min="5" max="90" step="1" :value="hueHalfRange" aria-label="Tolerance"
               @input="onHueTolChange(+$event.target.value)">
           </div>
 
@@ -165,7 +170,7 @@
               <span>Vividness <button class="sp-info" type="button">?<span class="sp-tooltip">Ignores washed-out or grey areas — lower if notes aren’t detected</span></button></span>
               <span class="sp-slider-val">{{ props.satMin }}%</span>
             </div>
-            <input type="range" min="0" max="100" step="1" :value="props.satMin"
+            <input type="range" min="0" max="100" step="1" :value="props.satMin" aria-label="Vividness"
               @input="$emit('update:satMin', +$event.target.value)">
           </div>
 
@@ -175,7 +180,7 @@
               <span>Brightness <button class="sp-info" type="button">?<span class="sp-tooltip">Ignores dark or shadowed areas — lower if notes in shadow aren’t detected</span></button></span>
               <span class="sp-slider-val">{{ props.valMin }}%</span>
             </div>
-            <input type="range" min="0" max="100" step="1" :value="props.valMin"
+            <input type="range" min="0" max="100" step="1" :value="props.valMin" aria-label="Brightness"
               @input="$emit('update:valMin', +$event.target.value)">
           </div>
 
@@ -185,7 +190,7 @@
               <span>Min size <button class="sp-info" type="button">?<span class="sp-tooltip">Ignores tiny colour blobs — increase to reduce noise</span></button></span>
               <span class="sp-slider-val">{{ props.minBlobArea }}</span>
             </div>
-            <input type="range" min="10" max="500" step="5" :value="props.minBlobArea"
+            <input type="range" min="10" max="500" step="5" :value="props.minBlobArea" aria-label="Minimum blob size"
               @input="$emit('update:minBlobArea', +$event.target.value)">
           </div>
 
@@ -200,8 +205,13 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import CameraSelect from './CameraSelect.vue'
+import { wrapHue } from '../utils/settings.js'
 
 const props = defineProps({
+  cameras: { type: Array, default: () => [] },
+  selectedCamera: { type: String, default: '' },
+  paused:         { type: Boolean, default: false },
   open:           { type: Boolean, default: true },
   appState:       { type: String, default: 'idle' },
   webcamOn:       { type: Boolean, default: false },
@@ -230,7 +240,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'toggle', 'toggle-webcam', 'calibrate', 'manual-calibrate', 'skip-calibration', 'reset-calibration',
+  'select-camera', 'toggle-pause', 'retry-detection', 'toggle', 'toggle-webcam', 'calibrate', 'manual-calibrate', 'skip-calibration', 'reset-calibration',
   'clear-balls', 'reset-physics', 'reset-detection', 'toggle-fullscreen', 'open-tour',
   'update:debug', 'update:showWebcamBg', 'update:showOutlines',
   'update:spawnInterval', 'update:ballSize', 'update:bounciness', 'update:gravity', 'update:maxBalls',
@@ -250,24 +260,32 @@ const physicsSliders = [
 const advancedOpen = ref(false)
 
 // Computed center/half-range from hueMin+hueMax
-const hueCenter   = computed(() => Math.round((props.hueMin + props.hueMax) / 2))
-const hueHalfRange = computed(() => Math.round((props.hueMax - props.hueMin) / 2))
+const hueCenter   = computed(() => wrapHue(Math.round(props.hueMin + hueHalfRange.value)))
+const hueHalfRange = computed(() => Math.round(wrapHue(props.hueMax - props.hueMin) / 2))
 
 function onHueCenterChange(center) {
   const half = hueHalfRange.value
-  emit('update:hueMin', Math.max(0, center - half))
-  emit('update:hueMax', Math.min(360, center + half))
+  emit('update:hueMin', wrapHue(center - half))
+  emit('update:hueMax', wrapHue(center + half))
 }
 function onHueTolChange(half) {
   const center = hueCenter.value
-  emit('update:hueMin', Math.max(0, center - half))
-  emit('update:hueMax', Math.min(360, center + half))
+  emit('update:hueMin', wrapHue(center - half))
+  emit('update:hueMax', wrapHue(center + half))
 }
 
 // Compute a CSS color from current hue range for the swatch
 const stickyColorCss = computed(() => `hsl(${hueCenter.value}, 80%, 55%)`)
 const statusMap = {
-  idle:         { cls: 'idle',        text: 'Idle' },
+  idle:         { cls: 'idle',        text: 'Setup' },
+  stopped:      { cls: 'idle', text: 'Camera stopped' },
+  ready:        { cls: 'idle', text: 'Ready' },
+  cameras: { type: Array, default: () => [] },
+  selectedCamera: { type: String, default: '' },
+  paused:       { cls: 'idle', text: 'Paused' },
+  manual:       { cls: 'idle', text: 'Editing mapping' },
+  picking:      { cls: 'idle', text: 'Picking color' },
+  'detection-error': { cls: 'error', text: 'Detection failed' },
   loading:      { cls: 'loading',     text: 'Loading…' },
   calibrating:  { cls: 'loading',     text: 'Calibrating…' },
   running:      { cls: 'running',     text: 'Running' },
@@ -355,7 +373,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   border-radius: 999px;
   border: 1px solid #27272a;
 }
-.sp-status.idle    { color: #52525b; border-color: #27272a; }
+.sp-status.idle    { color: #a1a1aa; border-color: #27272a; }
 .sp-status.loading { color: #a16207; border-color: #451a03; background: #1c1003; animation: pulse-text 1.2s infinite; }
 .sp-status.running { color: #16a34a; border-color: #14532d; background: #052e16; }
 .sp-status.error   { color: #dc2626; border-color: #7f1d1d; background: #1a0505; }
@@ -384,7 +402,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
 }
 .sp-stat label {
   font-size: 10px;
-  color: #52525b;
+  color: #a1a1aa;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -409,7 +427,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #52525b;
+  color: #a1a1aa;
   margin: 0 0 2px;
 }
 .sp-group-label {
@@ -417,7 +435,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #3f3f46;
+  color: #a1a1aa;
   margin: 8px 0 4px;
 }
 
@@ -453,7 +471,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
 
 .sp-btn.ghost {
   background: transparent;
-  color: #71717a;
+  color: #a1a1aa;
   border-color: #27272a;
 }
 .sp-btn.ghost:hover:not(:disabled) { background: #18181b; color: #e4e4e7; }
@@ -461,7 +479,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
 .sp-btn.destructive {
   background: transparent;
   border-color: #27272a;
-  color: #71717a;
+  color: #a1a1aa;
 }
 .sp-btn.destructive:hover:not(:disabled) {
   background: #1a0505;
@@ -482,12 +500,12 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   border-radius: 999px;
   border: 1px solid #27272a;
   background: transparent;
-  color: #52525b;
+  color: #a1a1aa;
   cursor: pointer;
   font-family: inherit;
   transition: color 0.12s, border-color 0.12s;
 }
-.sp-ghost-pill:hover { color: #a1a1aa; border-color: #3f3f46; }
+.sp-ghost-pill:hover { color: #a1a1aa; border-color: #a1a1aa; }
 .sp-ghost-pill:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── Color picker row ───────────────────────────────────── */
@@ -549,9 +567,11 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   justify-content: space-between;
   align-items: center;
 }
-.sp-slider-meta span:first-child { color: #71717a; }
-.sp-slider-meta span:first-child:hover .sp-info { border-color: #52525b; color: #a1a1aa; }
+.sp-slider-meta span:first-child { color: #a1a1aa; }
+.sp-slider-meta span:first-child:hover .sp-info:focus-visible .sp-tooltip { opacity: 1; }
+.sp-info { border-color: #a1a1aa; color: #a1a1aa; }
 .sp-slider-meta span:first-child:hover .sp-tooltip { opacity: 1; pointer-events: none; }
+.sp-info:focus-visible .sp-tooltip { opacity: 1; }
 .sp-info {
   display: inline-flex;
   align-items: center;
@@ -607,7 +627,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   appearance: none;
   background: #27272a;
   border-radius: 2px;
-  outline: none;
+  outline-offset: 4px;
   cursor: pointer;
 }
 .sp-slider input[type="range"]::-webkit-slider-thumb {
@@ -637,6 +657,8 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   border: none;
 }
 
+.sp-calib-help { margin: 0 0 6px; color: #a1a1aa; font-size: 11px; line-height: 1.5; }
+
 /* ── Calibration ────────────────────────────────────────── */
 .sp-progress { display: flex; flex-direction: column; gap: 4px; }
 .sp-progress-bar {
@@ -651,7 +673,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   border-radius: 2px;
   transition: width 0.3s ease;
 }
-.sp-progress-msg { font-size: 11px; color: #52525b; }
+.sp-progress-msg { font-size: 11px; color: #a1a1aa; }
 .sp-calib-ok {
   display: flex;
   align-items: center;
@@ -672,8 +694,8 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   cursor: pointer;
   font-family: inherit;
 }
-.sp-collapse-btn:hover .sp-section-label { color: #71717a; }
-.sp-chevron { color: #3f3f46; transition: transform 0.2s; }
+.sp-collapse-btn:hover .sp-section-label { color: #a1a1aa; }
+.sp-chevron { color: #a1a1aa; transition: transform 0.2s; }
 .sp-chevron.open { transform: rotate(180deg); }
 
 /* ── Webcam ─────────────────────────────────────────────── */
@@ -693,7 +715,7 @@ const statusText  = computed(() => statusMap[props.appState]?.text || props.appS
   margin: auto 0 0;
   padding: 12px 16px 0;
   font-size: 10px;
-  color: #3f3f46;
+  color: #a1a1aa;
   text-align: center;
 }
 .sp-footer kbd {

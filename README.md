@@ -34,32 +34,37 @@ The webcam and projector don't need to be perfectly aligned — that's what cali
 
 ## Calibration
 
-Calibration maps every projector pixel to its corresponding camera pixel using a Gray-code structured light sequence. You only need to redo this if the projector or camera moves.
+Calibration maps every projector pixel to its corresponding camera pixel using a Gray-code structured light sequence. Recalibrate if the projector or camera moves, the selected camera changes, or the output size changes. Mapping assumes a flat surface; objects away from that plane can have alignment errors.
 
 1. Clear the wall of people and moving objects
 2. Click **Calibrate** in the sidebar
-3. The projector will flash a series of black-and-white stripe patterns for ~7 seconds — don't cover the wall during this
-4. When it finishes, a quality score is shown. Anything above 60% is solid; re-run if it's lower
-5. Calibration is saved to `localStorage` — it persists across page reloads
+3. The projector will flash a series of black-and-white stripe patterns for roughly 20–30 seconds per attempt; up to three attempts may run. Don't cover the wall during this. Press **Esc** to cancel
+4. When it finishes, reprojection error and matching-point counts are shown. These describe the fitted mapping, not a guaranteed accuracy score. Check alignment against the actual surface
+5. Calibration is saved to `localStorage` when available. Saved mappings are reused only when camera identity, camera resolution, and output dimensions match. Older saved mappings without this information require recalibration
 
-> If you just want to try it quickly, hit **Skip** instead. The app will use proportional scaling, which works reasonably well when the camera is centred and close to the projector.
+> If you just want to try it quickly, choose **Skip for now** during setup. If a compatible mapping is saved, the tour offers **Use saved calibration** instead. The app will use proportional scaling, which works reasonably well when the camera is centred and close to the projector.
 
 ---
 
 ## Running
 
-1. Stick yellow post-its on the wall (or hold up any yellow object)
-2. Click **Start** and grant camera permission
-3. Balls start falling from the top and bounce off whatever the camera detects
-4. Tune detection sensitivity from the sidebar if objects aren't being picked up — adjust **Hue Range**, **Sat Min**, and **Val Min** to match your lighting
+1. Follow the setup guide and choose **Allow Camera**
+2. Calibrate or skip, then stick yellow post-its on the wall
+3. Balls fall from the top and bounce off detected outlines
+4. Press **H** to open settings. Under **Advanced → Detection**, use **Pick**, **Color**, **Tolerance**, **Vividness**, and **Brightness** to match your lighting
+5. For manual calibration, place the four corners on the projected area in the camera view. Drag to adjust, use **[ / ]** to select a corner, arrows to nudge, **Shift** for larger steps, and **Tab** to reach Apply or Cancel
+
+The camera runs locally in your browser. Use HTTPS or localhost for camera access. A browser with Web Workers, ImageBitmap, and OffscreenCanvas support is required.
 
 
 ## Running Locally (Optional)
 
+Use Node.js 20.19+ within the 20.x line, or 22.12+.
+
 ```bash
 git clone https://github.com/mishalshanavas/mappix.git
 cd mappix
-npm install
+npm ci
 npm run dev
 ```
 
@@ -68,3 +73,14 @@ Open `http://localhost:5173` in the browser on the machine driving the projector
 ---
 
 > Full hardware guide, calibration tuning, and troubleshooting coming in the wiki.
+
+## Verification
+
+```bash
+npm test
+npm run build
+npx playwright install chromium
+npm run test:browser
+```
+
+The browser test starts a local server on port 5175 and uses a simulated camera. It checks UI flows, not physical projector alignment. See [PROJECT_REVIEW.md](./PROJECT_REVIEW.md) for the review, completed fixes, and prioritized remaining work.

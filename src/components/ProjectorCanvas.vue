@@ -4,9 +4,10 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import Matter from 'matter-js'
+import { cameraViewport } from '../utils/coordinates.js'
 
 const props = defineProps({
+  previewOnly: { type: Boolean, default: false },
   engine: {        // Matter.js engine instance (shallowRef value)
     type: Object,
     default: null
@@ -39,6 +40,7 @@ const props = defineProps({
     type: Object,
     default: null
   },
+  isCalibrated: { type: Boolean, default: false },
   calibrationQuality: {
     type: Object,
     default: null
@@ -134,15 +136,13 @@ function renderLoop(now) {
   if (props.showWebcamBg && props.videoEl && props.videoEl.readyState >= 2) {
     const vw = props.videoEl.videoWidth || 640
     const vh = props.videoEl.videoHeight || 480
-    const scale = Math.max(W / vw, H / vh)
-    const dw = vw * scale
-    const dh = vh * scale
-    const dx = (W - dw) / 2
-    const dy = (H - dh) / 2
-    ctx.globalAlpha = 0.35
-    ctx.drawImage(props.videoEl, dx, dy, dw, dh)
+    const viewport = cameraViewport(vw, vh, W, H)
+    ctx.globalAlpha = props.previewOnly ? 1 : 0.35
+    ctx.drawImage(props.videoEl, viewport.x, viewport.y, viewport.width, viewport.height)
     ctx.globalAlpha = 1.0
   }
+
+  if (props.previewOnly) return
 
   // === Draw physics bodies ===
   if (props.engine) {
@@ -273,13 +273,13 @@ function drawDebugOverlay(ctx, W, H) {
     [],
     cq
       ? [{ t: 'calib err: ', c: '#aaaaaa' }, { t: `${cq.error} px`, c: '#55FF55' }]
-      : [{ t: 'calibration: ', c: '#aaaaaa' }, { t: 'none', c: '#FF5555' }],
+      : [{ t: 'calibration: ', c: '#aaaaaa' }, { t: props.isCalibrated ? 'saved / manual' : 'none', c: props.isCalibrated ? '#55FF55' : '#FF5555' }],
     ...(cq ? [
       [{ t: 'inliers: ', c: '#aaaaaa' }, { t: `${cq.inliers}/${cq.total}`, c: '#ffffff' }],
       [{ t: 'coverage: ', c: '#aaaaaa' }, { t: `${cq.validPct}%`, c: '#ffffff' }],
     ] : []),
     [],
-    [{ t: 'detection: ', c: '#aaaaaa' }, { t: '5 Hz', c: '#ffffff' }],
+    [{ t: 'detection: ', c: '#aaaaaa' }, { t: `${(1000 / Math.max(100, Math.round(1000 / Math.max(1, props.targetFps / 4)))).toFixed(1)} Hz`, c: '#ffffff' }],
     [{ t: 'bodies total: ', c: '#aaaaaa' }, { t: `${dynCount + staticCount}`, c: '#ffffff' }],
     [],
     [{ t: 'DEBUG KEYS:', c: '#FFFF55' }],

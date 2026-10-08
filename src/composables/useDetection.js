@@ -1,179 +1,96 @@
 /**
- * useDetection — yellow sticky note detection at 5 Hz.
+ * useDetection — configurable color detection at 2.5–10 Hz.
  *
- * Detection pipeline runs in a Web Worker (OffscreenCanvas-free approach):
- * main thread captures ImageData and transfers the pixel buffer to the worker;
+ * Detection pipeline runs in a Web Worker using OffscreenCanvas:
+ * main thread captures and transfers an ImageBitmap to the worker;
  * worker runs downsample → yellow HSV mask → morphClose → findBlobs and posts
  * raw blobs back; main thread applies temporal smoothing + transformPoint.
  *
- * Temporal smoothing: blobs must appear in CONFIRM_FRAMES consecutive frames
- * before becoming active, and disappear for REMOVE_FRAMES consecutive frames
- * before being removed. Prevents single-frame glitches from adding/removing
- * physics bodies.
+ * Two observations confirm an object; a 500 ms absence removes it. Matching
+ * and time-based outline smoothing happen in camera coordinates.
  *
  * startDetection(captureFrame, transformPoint)
  * updateSettings({ hueMin, hueMax, satMin, valMin, minBlobArea })
  */
 import { ref } from 'vue'
+import { createBlobTracker } from '../utils/tracking.js'
+import { polygonBounds } from '../utils/geometry.js'
+import { detectionDefaults, normalizeSettings } from '../utils/settings.js'
 
 const DEFAULT_DETECTION_INTERVAL = 200   // 5 Hz
 const DOWNSAMPLE_FACTOR = 2         // must match worker default
-const CONFIRM_FRAMES = 2            // frames a new blob must appear before going active
-const REMOVE_FRAMES  = 3            // frames a blob must be absent before removal
-const MATCH_DIST_PX  = 80           // max centroid distance to match blobs across frames
-const SMOOTH_ALPHA   = 0.15         // EMA factor: lower = smoother outline (0 = frozen, 1 = raw)
-const HULL_RESAMPLE  = 24           // fixed number of equidistant points per hull
-
-/**
- * Resample a convex hull to N equidistant points along its perimeter.
- * This ensures hull point counts are always identical across frames,
- * enabling per-point EMA smoothing even when raw hull topology changes.
- */
-function _resampleHull(hull, n) {
-  if (!hull || hull.length < 3) return hull
-  // Compute cumulative perimeter distances
-  const len = hull.length
-  const cumDist = [0]
-  for (let i = 1; i <= len; i++) {
-    const a = hull[i - 1], b = hull[i % len]
-    cumDist.push(cumDist[i - 1] + Math.hypot(b.x - a.x, b.y - a.y))
-  }
-  const totalLen = cumDist[len]
-  if (totalLen < 1e-6) return hull
-
-  const out = []
-  for (let k = 0; k < n; k++) {
-    const target = (k / n) * totalLen
-    // Find segment containing this distance
-    let seg = 0
-    while (seg < len - 1 && cumDist[seg + 1] < target) seg++
-    const segLen = cumDist[seg + 1] - cumDist[seg]
-    const t = segLen > 1e-6 ? (target - cumDist[seg]) / segLen : 0
-    const a = hull[seg], b = hull[(seg + 1) % len]
-    out.push({ x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) })
-  }
-  return out
-}
-
 export function useDetection() {
   const detectedRects = ref([])
   let _timer  = null
   let _worker = null
   let _busy   = false
+  let lastCapture = 0
+  let lastVideoTime = null
   let _detectionInterval = DEFAULT_DETECTION_INTERVAL
   let _getVideoEl = null
 
-  let _s = { hueMin: 15, hueMax: 70, satMin: 8, valMin: 55, minBlobArea: 50 }
+  let _s = { ...detectionDefaults }
+  const error = ref('')
 
-  // Tracked blob state: { id, cx, cy, w, h, hull, seenFor, missedFor, active }
-  let _tracked = []
-  let _nextId  = 1
+  const tracker = createBlobTracker()
   let _transformPoint = null
 
-  function updateSettings(s) { _s = { ..._s, ...s } }
+  function updateSettings(s) { _s = normalizeSettings({ ..._s, ...s }, detectionDefaults) }
 
-  /** Nearest-centroid match between raw worker blobs and tracked blobs */
   function _matchBlobs(rawBlobs) {
     const F = DOWNSAMPLE_FACTOR
-    const tp = _transformPoint
-
-    const detections = rawBlobs.map(b => {
-      let hull = (b.hull && b.hull.length >= 3)
-        ? b.hull.map(p => tp(p.x * F, p.y * F))
-        : [
-            tp(b.x * F, b.y * F),
-            tp((b.x + b.w) * F, b.y * F),
-            tp((b.x + b.w) * F, (b.y + b.h) * F),
-            tp(b.x * F, (b.y + b.h) * F),
-          ]
-      hull = _resampleHull(hull, HULL_RESAMPLE)
-      const cx = hull.reduce((s, p) => s + p.x, 0) / hull.length
-      const cy = hull.reduce((s, p) => s + p.y, 0) / hull.length
-      return { cx, cy, w: Math.abs(b.w * F), h: Math.abs(b.h * F), hull }
+    const tracks = tracker.update(rawBlobs.map(b => ({
+      ...b, x: b.x * F, y: b.y * F, w: b.w * F, h: b.h * F,
+      hull: b.hull?.map(p => ({ x: p.x * F, y: p.y * F })),
+    })), performance.now())
+    detectedRects.value = tracks.flatMap(track => {
+      const hull = track.hull.map(p => _transformPoint(p.x, p.y))
+      if (hull.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return []
+      return [{ id: track.id, ...polygonBounds(hull), angle: 0, hull }]
     })
-
-    for (const t of _tracked) t._matchedThisFrame = false
-
-    // Greedy nearest-centroid matching
-    for (const det of detections) {
-      let bestTrack = null
-      let bestDist = MATCH_DIST_PX
-
-      for (const t of _tracked) {
-        if (t._matchedThisFrame) continue
-        const dx = t.cx - det.cx, dy = t.cy - det.cy
-        const d = Math.sqrt(dx * dx + dy * dy)
-        if (d < bestDist) { bestDist = d; bestTrack = t }
-      }
-
-      if (bestTrack) {
-        const a = SMOOTH_ALPHA
-        const b = 1 - a
-        bestTrack.cx = b * bestTrack.cx + a * det.cx
-        bestTrack.cy = b * bestTrack.cy + a * det.cy
-        bestTrack.w  = b * bestTrack.w  + a * det.w
-        bestTrack.h  = b * bestTrack.h  + a * det.h
-        // Always smooth hull per-point (both are resampled to HULL_RESAMPLE length)
-        if (bestTrack.hull && bestTrack.hull.length === det.hull.length) {
-          for (let i = 0; i < det.hull.length; i++) {
-            bestTrack.hull[i] = {
-              x: b * bestTrack.hull[i].x + a * det.hull[i].x,
-              y: b * bestTrack.hull[i].y + a * det.hull[i].y,
-            }
-          }
-        } else {
-          bestTrack.hull = det.hull
-        }
-        bestTrack.seenFor++
-        bestTrack.missedFor = 0
-        bestTrack._matchedThisFrame = true
-        if (bestTrack.seenFor >= CONFIRM_FRAMES) bestTrack.active = true
-      } else {
-        _tracked.push({
-          id: _nextId++,
-          cx: det.cx, cy: det.cy, w: det.w, h: det.h, hull: det.hull,
-          seenFor: 1, missedFor: 0, active: false,
-          _matchedThisFrame: true,
-        })
-      }
-    }
-
-    _tracked = _tracked.filter(t => {
-      if (!t._matchedThisFrame) {
-        t.missedFor++
-        t.seenFor = 0
-      }
-      return t.missedFor < REMOVE_FRAMES
-    })
-
-    detectedRects.value = _tracked
-      .filter(t => t.active)
-      .map(t => ({ id: t.id, cx: t.cx, cy: t.cy, w: t.w, h: t.h, angle: 0, hull: t.hull }))
   }
 
   /** Shared timer tick — captures a frame and sends it to the worker. */
   async function _tick() {
+    if (performance.now() - lastCapture > 2500) {
+      stopDetection()
+      error.value = 'Detection stopped receiving frames. Check the camera, then retry detection.'
+      return
+    }
     if (_busy) return
     const video = _getVideoEl?.()
     if (!video || video.readyState < 2) return
+    if (video.currentTime === lastVideoTime) return
+    lastVideoTime = video.currentTime
+    lastCapture = performance.now()
+    const worker = _worker
     _busy = true
+    let bmp
     try {
-      const bmp = await createImageBitmap(video)
+      bmp = await createImageBitmap(video)
       // Guard against worker being terminated during the async gap above
-      if (!_worker) { _busy = false; return }
-      _worker.postMessage(
+      if (!worker || worker !== _worker) { bmp.close(); return }
+      worker.postMessage(
         { bitmap: bmp, settings: { ..._s }, downsampleFactor: DOWNSAMPLE_FACTOR },
         [bmp]
       )
-    } catch {
-      _busy = false
+    } catch (err) {
+      bmp?.close()
+      if (worker === _worker) {
+        stopDetection()
+        error.value = `Detection stopped: ${err.message}. Restart the camera to retry.`
+      }
     }
   }
 
   function startDetection(getVideoEl, transformPoint) {
     if (_timer) clearInterval(_timer)
     if (_worker) _worker.terminate()
-    _tracked = []
+    tracker.reset()
+    lastCapture = performance.now()
+    lastVideoTime = null
+    detectedRects.value = []
+    error.value = ''
     _busy = false
     _transformPoint = transformPoint
     _getVideoEl = getVideoEl
@@ -184,22 +101,37 @@ export function useDetection() {
         new URL('../workers/detection.worker.js', import.meta.url),
         { type: 'module' }
       )
+      const worker = _worker
       _worker.onmessage = ({ data: { blobs } }) => {
+        if (worker !== _worker) return
         _busy = false
         _matchBlobs(blobs)
       }
       _worker.onerror = (e) => {
+        if (worker !== _worker) return
         console.error('[Detection worker]', e)
         _busy = false
         if (_restarts < 3) {
           _restarts++
           console.warn(`[Detection] Restarting worker (${_restarts}/3)`)
           _worker.terminate()
-          _initWorker()
+          lastCapture = performance.now()
+          lastVideoTime = null
+          try { _initWorker() } catch (err) {
+            stopDetection()
+            error.value = `Detection unavailable: ${err.message}`
+          }
+        } else {
+          stopDetection()
+          error.value = 'Object detection failed. Restart the camera or try a browser with OffscreenCanvas support.'
         }
       }
     }
-    _initWorker()
+    try { _initWorker() } catch (err) {
+      stopDetection()
+      error.value = `Detection unavailable: ${err.message}`
+      return
+    }
 
     _timer = setInterval(_tick, _detectionInterval)
   }
@@ -217,10 +149,10 @@ export function useDetection() {
   function stopDetection() {
     if (_timer) { clearInterval(_timer); _timer = null }
     if (_worker) { _worker.terminate(); _worker = null }
-    _tracked = []
+    tracker.reset()
     _busy = false
     detectedRects.value = []
   }
 
-  return { detectedRects, startDetection, stopDetection, updateSettings, setTargetFps }
+  return { error, detectedRects, startDetection, stopDetection, updateSettings, setTargetFps }
 }

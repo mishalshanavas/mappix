@@ -7,60 +7,86 @@
  *   const canvas = captureFrame()  // returns offscreen canvas with current frame
  */
 import { ref, shallowRef } from 'vue'
+import { waitForVideoFrame } from '../utils/async.js'
 
 export function useWebcam() {
   const videoEl = shallowRef(null)
   const stream = shallowRef(null)
   const ready = ref(false)
+  const devices = ref([])
 
   // Hidden offscreen canvas used for grabbing frames
   let _offscreenCanvas = null
   let _offscreenCtx = null
 
-  async function startWebcam(deviceId = null) {
-    const constraints = {
-      video: {
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-        frameRate: { ideal: 30 },
-        ...(deviceId ? { deviceId: { exact: deviceId } } : {})
-      },
-      audio: false
+  let generation = 0
+  let pending = null
+
+  async function refreshDevices() {
+    try { devices.value = (await navigator.mediaDevices?.enumerateDevices?.() || []).filter(device => device.kind === 'videoinput') } catch { devices.value = [] }
+  }
+
+  function startWebcam(deviceId = null) {
+    if (ready.value) return Promise.resolve()
+    if (pending) return pending
+    const session = ++generation
+    const request = openCamera(deviceId, session)
+    pending = request
+    request.finally(() => { if (pending === request) pending = null }).catch(() => {})
+    return request
+  }
+
+  async function openCamera(deviceId, session) {
+    let acquired = null
+    let video = null
+    const checkActive = () => {
+      if (session !== generation) throw new DOMException('Camera request cancelled', 'AbortError')
     }
-
-    stream.value = await navigator.mediaDevices.getUserMedia(constraints)
-
-    const video = document.createElement('video')
-    video.srcObject = stream.value
-    video.playsInline = true
-    video.muted = true
-    await video.play()
-
-    // Try to lock exposure & white balance so calibration frames are consistent
     try {
-      const track = stream.value.getVideoTracks()[0]
-      const caps = track.getCapabilities?.() || {}
-      const adv = []
-      if (caps.exposureMode) adv.push({ exposureMode: 'manual' })
-      if (caps.whiteBalanceMode) adv.push({ whiteBalanceMode: 'manual' })
-      if (adv.length) await track.applyConstraints({ advanced: adv })
-    } catch (_) {
-      // Not supported on all browsers — silently skip
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access requires HTTPS or localhost and a supported browser')
+      acquired = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 },
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        },
+        audio: false,
+      })
+      checkActive()
+      stream.value = acquired
+      video = document.createElement('video')
+      video.srcObject = acquired
+      video.playsInline = true
+      video.muted = true
+      await video.play()
+      checkActive()
+      // Keep the camera's automatic exposure until a measured lock strategy exists.
+      // Switching to manual with no exposure value can leave the feed black.
+      videoEl.value = video
+      ready.value = true
+      await refreshDevices()
+      checkActive()
+      for (const track of acquired.getVideoTracks()) {
+        track.addEventListener('ended', () => { if (session === generation) stopWebcam() }, { once: true })
+      }
+    } catch (err) {
+      acquired?.getTracks().forEach(track => track.stop())
+      if (video) video.srcObject = null
+      if (session === generation) {
+        stream.value = null
+        videoEl.value = null
+        ready.value = false
+      }
+      throw err
     }
-
-    videoEl.value = video
-    ready.value = true
   }
 
   function stopWebcam() {
-    if (stream.value) {
-      stream.value.getTracks().forEach((t) => t.stop())
-      stream.value = null
-    }
-    if (videoEl.value) {
-      videoEl.value.srcObject = null
-      videoEl.value = null
-    }
+    generation++
+    pending = null
+    stream.value?.getTracks().forEach(track => track.stop())
+    stream.value = null
+    if (videoEl.value) videoEl.value.srcObject = null
+    videoEl.value = null
     ready.value = false
   }
 
@@ -70,7 +96,7 @@ export function useWebcam() {
    */
   function captureFrame() {
     const video = videoEl.value
-    if (!video) return null
+    if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return null
 
     const w = video.videoWidth || 640
     const h = video.videoHeight || 480
@@ -90,35 +116,9 @@ export function useWebcam() {
    * Wait until the video element has a genuinely new frame.
    * Uses requestVideoFrameCallback when available, falls back to polling currentTime.
    */
-  function waitForNewFrame(timeoutMs = 500) {
-    const video = videoEl.value
-    if (!video) return Promise.resolve()
-
-    // Preferred: requestVideoFrameCallback (Chrome 83+, Edge, Opera)
-    if ('requestVideoFrameCallback' in video) {
-      return new Promise(resolve => {
-        const timer = setTimeout(resolve, timeoutMs)
-        video.requestVideoFrameCallback(() => {
-          clearTimeout(timer)
-          resolve()
-        })
-      })
-    }
-
-    // Fallback: poll until currentTime changes
-    const startTime = video.currentTime
-    return new Promise(resolve => {
-      const deadline = performance.now() + timeoutMs
-      function poll() {
-        if (video.currentTime !== startTime || performance.now() > deadline) {
-          resolve()
-        } else {
-          requestAnimationFrame(poll)
-        }
-      }
-      requestAnimationFrame(poll)
-    })
+  function waitForNewFrame(timeoutMs = 1000, signal) {
+    return waitForVideoFrame(videoEl.value, timeoutMs, signal)
   }
 
-  return { videoEl, stream, ready, startWebcam, stopWebcam, captureFrame, waitForNewFrame }
+  return { videoEl, stream, ready, devices, refreshDevices, startWebcam, stopWebcam, captureFrame, waitForNewFrame }
 }

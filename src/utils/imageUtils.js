@@ -3,7 +3,7 @@
  * No OpenCV / WASM.  Works directly on ImageData obtained from a canvas.
  *
  * Designed for 640×480 webcam frames; all hot paths operate on
- * a 4× downsampled (160×120) copy for speed.
+ * a 2× downsampled (320×240) copy for speed.
  */
 
 // ---------------------------------------------------------------------------

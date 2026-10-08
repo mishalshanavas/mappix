@@ -21,7 +21,7 @@
 
           <p class="tour-mode-label">How are you set up?</p>
           <div class="mode-opts">
-            <button class="mode-opt" :class="{ selected: setupMode === 'projector' }" @click="setupMode = 'projector'">
+            <button class="mode-opt" :class="{ selected: setupMode === 'projector' }" :aria-pressed="setupMode === 'projector'" @click="setupMode = 'projector'">
               <span class="mode-opt-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <rect x="2" y="7" width="20" height="12" rx="2"/>
@@ -37,7 +37,7 @@
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
               </span>
             </button>
-            <button class="mode-opt" :class="{ selected: setupMode === 'laptop' }" @click="setupMode = 'laptop'">
+            <button class="mode-opt" :class="{ selected: setupMode === 'laptop' }" :aria-pressed="setupMode === 'laptop'" @click="setupMode = 'laptop'">
               <span class="mode-opt-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <rect x="2" y="3" width="20" height="14" rx="2"/>
@@ -189,6 +189,8 @@
           </div>
           <h2 class="tour-h2">{{ cameraTitle }}</h2>
           <p class="tour-sub">{{ cameraSub }}</p>
+          <CameraSelect v-if="cameras.length" :devices="cameras" :modelValue="selectedCamera" :disabled="cameraState === 'loading'" @update:modelValue="$emit('select-camera', $event)" />
+          <video v-if="cameraState === 'ready'" class="camera-preview" :srcObject.prop="videoStream" autoplay muted playsinline aria-label="Live camera preview" />
           <div class="tour-actions">
             <button class="btn-ghost" @click="goTo(2)">Back</button>
             <button v-if="cameraState !== 'ready'" class="btn-primary"
@@ -217,16 +219,16 @@
                 Auto Calibrate
                 <span class="badge">Recommended</span>
               </div>
-              <div class="calib-opt-desc">Projects patterns for ~7 s. Pixel-accurate mapping.</div>
+              <div class="calib-opt-desc">Projects flashing patterns to align the camera. Allow 20–30 seconds per attempt; retries take longer.</div>
             </button>
             <button class="calib-opt" @click="$emit('skip-calibration')">
-              <div class="calib-opt-title">Skip for now</div>
-              <div class="calib-opt-desc">Proportional scaling. Works when the camera is roughly centred.</div>
+              <div class="calib-opt-title">{{ isCalibrated ? 'Use saved calibration' : 'Skip for now' }}</div>
+              <div class="calib-opt-desc">{{ isCalibrated ? 'Continue with the saved mapping. Recalibrate if the camera or projector has moved.' : 'Proportional scaling. Works when the camera is roughly centred.' }}</div>
             </button>
           </div>
           <div class="tour-actions">
             <button class="btn-ghost" @click="goTo(3)">Back</button>
-            <button class="btn-primary" @click="startCalibCountdown()">Finish</button>
+            <button class="btn-primary" @click="startCalibCountdown()">Start calibration</button>
           </div>
         </div>
 
@@ -241,9 +243,10 @@
           </div>
           <h2 class="tour-h2 calib-warning-title">Don't Move Anything</h2>
           <p class="calib-warning-sub">Keep the projector, webcam, and surface <strong>perfectly still</strong>.<br>Ensure everything is <strong>aligned</strong> before calibration starts.</p>
+          <button class="btn-ghost" @click="goTo(4)">Cancel calibration</button>
           <div class="calib-countdown">{{ countdown }}</div>
           <p class="calib-countdown-sub">second{{ countdown !== 1 ? 's' : '' }}</p>
-          <p class="calib-duration-hint">Calibration takes ~15 seconds</p>
+          <p class="calib-duration-hint">Allow 20–30 seconds per attempt; up to 3 attempts. Press Esc to cancel once patterns start.</p>
         </div>
 
       </Transition>
@@ -259,14 +262,19 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
+import CameraSelect from './CameraSelect.vue'
 
 const props = defineProps({
+  cameras: { type: Array, default: () => [] },
+  selectedCamera: { type: String, default: '' },
+  videoStream: { default: null },
+  isCalibrated: { type: Boolean, default: false },
   cameraState: { type: String, default: 'idle' }, // 'idle' | 'loading' | 'ready' | 'denied'
   closeable:   { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['request-camera', 'calibrate', 'skip-calibration', 'close'])
+const emit = defineEmits(['select-camera', 'request-camera', 'calibrate', 'skip-calibration', 'close'])
 
 const step = ref(1)
 const slideDir = ref('left')
@@ -275,10 +283,11 @@ const countdown = ref(5)
 let _countdownTimer = null
 
 function startCalibCountdown() {
+  if (props.cameraState !== 'ready') { goTo(3); return }
   goTo(5)
-  countdown.value = 6
+  countdown.value = 5
   if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen().catch(() => {})
+    document.documentElement.requestFullscreen?.().catch(() => {})
   }
   _countdownTimer = setInterval(() => {
     countdown.value--
@@ -290,16 +299,10 @@ function startCalibCountdown() {
 }
 
 function goTo(n) {
+  clearInterval(_countdownTimer)
   slideDir.value = n > step.value ? 'left' : 'right'
   step.value = n
 }
-
-// Auto-advance to calibration when camera becomes ready on step 3
-watch(() => props.cameraState, (state) => {
-  if (state === 'ready' && step.value === 3) {
-    setTimeout(() => goTo(4), 700)
-  }
-})
 
 onUnmounted(() => {
   if (_countdownTimer) clearInterval(_countdownTimer)
@@ -308,23 +311,26 @@ onUnmounted(() => {
 const cameraTitle = computed(() => {
   if (props.cameraState === 'ready')  return 'Camera ready'
   if (props.cameraState === 'denied') return 'Access denied'
+  if (props.cameraState === 'error') return 'Camera unavailable'
   return 'Allow camera access'
 })
 
 const cameraSub = computed(() => {
   if (props.cameraState === 'ready')  return 'Webcam is active. Hit Continue to set up calibration.'
   if (props.cameraState === 'denied') return 'Camera permission was denied. Check your browser settings and try again.'
+  if (props.cameraState === 'error') return 'Check that a camera is connected and available. Close other camera apps, then try again.'
   return 'Mappix uses your webcam to detect objects on the wall in real time.'
 })
 
 const heroClass = computed(() => ({
   success: props.cameraState === 'ready',
-  error:   props.cameraState === 'denied',
+  error:   ['denied', 'error'].includes(props.cameraState),
   loading: props.cameraState === 'loading',
 }))
 </script>
 
 <style scoped>
+.camera-preview { width: 100%; max-height: 180px; object-fit: contain; margin-top: 12px; background: #000; border-radius: 8px; }
 /* ── Wrap ─────────────────────────────────────────────────── */
 .tour-wrap {
   position: fixed;
@@ -344,11 +350,12 @@ const heroClass = computed(() => ({
   position: relative;
   width: 100%;
   max-width: 420px;
+  max-height: calc(100dvh - 72px);
+  overflow-y: auto;
   background: #0c0c0e;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   padding: 36px 36px 24px;
-  overflow: hidden;
 }
 
 /* ── Close button ─────────────────────────────────────────── */
@@ -361,7 +368,7 @@ const heroClass = computed(() => ({
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
-  color: #52525b;
+  color: #a1a1aa;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -427,7 +434,7 @@ const heroClass = computed(() => ({
 }
 .tour-sub {
   font-size: 13px;
-  color: #71717a;
+  color: #a1a1aa;
   margin: 0 0 20px;
   line-height: 1.55;
   max-width: 310px;
@@ -468,7 +475,7 @@ const heroClass = computed(() => ({
 }
 .tour-tips li {
   font-size: 12px;
-  color: #71717a;
+  color: #a1a1aa;
   padding-left: 14px;
   position: relative;
   line-height: 1.4;
@@ -481,7 +488,7 @@ const heroClass = computed(() => ({
   content: '–';
   position: absolute;
   left: 0;
-  color: #3f3f46;
+  color: #a1a1aa;
 }
 /* ── Mode badge (experimental) ───────────────────────────── */
 .mode-badge {
@@ -502,7 +509,7 @@ const heroClass = computed(() => ({
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #3f3f46;
+  color: #a1a1aa;
   margin: 0 0 8px;
   width: 100%;
   text-align: left;
@@ -540,7 +547,7 @@ const heroClass = computed(() => ({
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #52525b;
+  color: #a1a1aa;
   flex-shrink: 0;
   transition: color 0.15s;
 }
@@ -560,10 +567,10 @@ const heroClass = computed(() => ({
 }
 .mode-opt-desc {
   font-size: 11px;
-  color: #52525b;
+  color: #a1a1aa;
   line-height: 1.3;
 }
-.mode-opt.selected .mode-opt-desc { color: #71717a; }
+.mode-opt.selected .mode-opt-desc { color: #a1a1aa; }
 .mode-check {
   display: flex;
   align-items: center;
@@ -615,12 +622,12 @@ const heroClass = computed(() => ({
 }
 .calib-countdown-sub {
   font-size: 13px;
-  color: #52525b;
+  color: #a1a1aa;
   margin: 0 0 8px;
 }
 .calib-duration-hint {
   font-size: 12px;
-  color: #3f3f46;
+  color: #a1a1aa;
   margin: 0 0 24px;
   letter-spacing: 0.01em;
 }
@@ -668,7 +675,7 @@ const heroClass = computed(() => ({
 }
 .calib-opt-desc {
   font-size: 12px;
-  color: #71717a;
+  color: #a1a1aa;
   line-height: 1.4;
 }
 .badge {
@@ -714,7 +721,7 @@ const heroClass = computed(() => ({
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: transparent;
-  color: #71717a;
+  color: #a1a1aa;
   font-size: 13px;
   font-weight: 500;
   font-family: inherit;
@@ -746,7 +753,7 @@ const heroClass = computed(() => ({
 .tour-hint {
   margin-top: 18px;
   font-size: 11px;
-  color: #3f3f46;
+  color: #a1a1aa;
 }
 .tour-hint kbd {
   background: rgba(255, 255, 255, 0.06);
@@ -755,7 +762,7 @@ const heroClass = computed(() => ({
   padding: 1px 5px;
   font-size: 10px;
   font-family: inherit;
-  color: #52525b;
+  color: #a1a1aa;
 }
 
 /* ── Slide transitions ────────────────────────────────────── */

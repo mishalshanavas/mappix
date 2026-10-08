@@ -73,10 +73,10 @@ function mat3x3mul(A, B) {
 }
 
 // Invert a 3×3 matrix (flat row-major).  Returns null if singular.
-function mat3x3inv(M) {
+export function invertHomography(M) {
   const [a, b, c, d, e, f, g, h, k] = M
   const det = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g)
-  if (Math.abs(det) < 1e-14) return null
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-14) return null
   const inv_det = 1 / det
   return [
     (e * k - f * h) * inv_det, (c * h - b * k) * inv_det, (b * f - c * e) * inv_det,
@@ -89,7 +89,7 @@ function mat3x3inv(M) {
 // Main export: compute homography via normalised DLT + least-squares
 // ---------------------------------------------------------------------------
 export function computeHomography(srcPts, dstPts) {
-  if (srcPts.length < 4) throw new Error('Need at least 4 correspondences')
+  if (srcPts.length < 4 || srcPts.length !== dstPts.length || [...srcPts, ...dstPts].some(p => !Array.isArray(p) || p.length !== 2 || !p.every(Number.isFinite))) throw new Error('Need matching sets of at least 4 finite points')
 
   const { pts: srcN, T: Ts } = normalise(srcPts)
   const { pts: dstN, T: Td } = normalise(dstPts)
@@ -125,7 +125,7 @@ export function computeHomography(srcPts, dstPts) {
   const Hn = [...h, 1]
 
   // Denormalise: H = Td^-1 * Hn * Ts
-  const TdInv = mat3x3inv(Td)
+  const TdInv = invertHomography(Td)
   if (!TdInv) throw new Error('Degenerate destination points')
   const H = mat3x3mul(TdInv, mat3x3mul(Hn, Ts))
 
@@ -135,7 +135,12 @@ export function computeHomography(srcPts, dstPts) {
     for (let i = 0; i < 9; i++) H[i] *= scale
   }
 
+  if (!H.every(Number.isFinite) || !invertHomography(H)) throw new Error('Invalid homography')
   return H
+}
+
+export function isValidHomography(H) {
+  return Array.isArray(H) && H.length === 9 && H.every(Number.isFinite) && !!invertHomography(H)
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +148,7 @@ export function computeHomography(srcPts, dstPts) {
 // ---------------------------------------------------------------------------
 export function applyHomography(H, x, y) {
   const w = H[6] * x + H[7] * y + H[8]
+  if (!Number.isFinite(w) || Math.abs(w) < 1e-10) return { x: NaN, y: NaN }
   return {
     x: (H[0] * x + H[1] * y + H[2]) / w,
     y: (H[3] * x + H[4] * y + H[5]) / w,
@@ -169,7 +175,7 @@ export function computeHomographyRANSAC(srcPts, dstPts, threshold = 5, iteration
   if (n === 4) {
     const H = computeHomography(srcPts, dstPts)
     const err = _meanReprojError(H, srcPts, dstPts)
-    return { H, inliers: 4, error: err }
+    return { H, inliers: 4, inlierIndices: [0, 1, 2, 3], error: err }
   }
 
   let bestH = null
@@ -235,8 +241,14 @@ export function computeHomographyRANSAC(srcPts, dstPts, threshold = 5, iteration
     } catch { /* keep previous bestH */ }
   }
 
-  const finalError = _meanReprojError(bestH, inlierSrc.length >= 4 ? inlierSrc : srcPts, inlierSrc.length >= 4 ? inlierDst : dstPts)
-  return { H: bestH, inliers: bestInliers, error: finalError }
+  const inlierIndices = []
+  for (let i = 0; i < n; i++) {
+    const point = applyHomography(bestH, ...srcPts[i])
+    if (Math.hypot(point.x - dstPts[i][0], point.y - dstPts[i][1]) < threshold) inlierIndices.push(i)
+  }
+  if (inlierIndices.length < 4) throw new Error('Refitted mapping has too few inliers')
+  const finalError = _meanReprojError(bestH, inlierIndices.map(i => srcPts[i]), inlierIndices.map(i => dstPts[i]))
+  return { H: bestH, inliers: inlierIndices.length, inlierIndices, error: finalError }
 }
 
 function _meanReprojError(H, srcPts, dstPts) {

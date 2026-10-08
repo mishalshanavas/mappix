@@ -10,6 +10,7 @@
  * transformPoint is a main-thread function.
  */
 
+import { hueMatches } from '../utils/settings.js'
 import { morphClose, morphOpen, findBlobs } from '../utils/imageUtils.js'
 
 /** Downsample RGBA pixels by integer factor (nearest-neighbour, no ImageData API needed). */
@@ -50,7 +51,7 @@ function yellowMask(data, pixelCount, s) {
       else h = ((r - g) / d + 4) / 6
     }
     h *= 360
-    if (h >= s.hueMin && h <= s.hueMax) mask[i] = 1
+    if (hueMatches(h, s.hueMin, s.hueMax)) mask[i] = 1
   }
   return mask
 }
@@ -66,8 +67,7 @@ self.onmessage = ({ data: msg }) => {
     _osc = new OffscreenCanvas(width, height)
     _octx = _osc.getContext('2d', { willReadFrequently: true })
   }
-  _octx.drawImage(bitmap, 0, 0)
-  bitmap.close()
+  try { _octx.drawImage(bitmap, 0, 0) } finally { bitmap.close() }
 
   const pixels = _octx.getImageData(0, 0, width, height).data
   const img = downsampleRaw(pixels, width, height, downsampleFactor)
